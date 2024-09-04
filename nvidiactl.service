@@ -1,0 +1,14 @@
+[Unit]
+Description=nvidiactl
+Wants=syslog.target
+After=graphical.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/nvidiactl
+Restart=always
+RestartSec=3
+SyslogIdentifier=nvidiactl
+
+[Install]
+WantedBy=graphical.target
