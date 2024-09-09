@@ -120,7 +120,7 @@ func init() {
 func initNvml() error {
 	ret := nvml.Init()
 	if ret != nvml.SUCCESS {
-		return fmt.Errorf("unable to initialize NVML: %v", nvml.ErrorString(ret))
+		return fmt.Errorf("failed to initialize NVML: %v", nvml.ErrorString(ret))
 	}
 	nvmlInitialized = true
 	defer func() {
@@ -131,27 +131,27 @@ func initNvml() error {
 
 	count, ret := nvml.DeviceGetCount()
 	if ret != nvml.SUCCESS {
-		return fmt.Errorf("unable to get device count: %v", nvml.ErrorString(ret))
+		return fmt.Errorf("failed to get device count: %v", nvml.ErrorString(ret))
 	}
 
 	if count == 0 {
-		return fmt.Errorf("no NVIDIA GPUs found")
+		return fmt.Errorf("failed to find any NVIDIA GPUs")
 	}
 
 	// We'll use the first GPU (index 0)
 	device, ret := nvml.DeviceGetHandleByIndex(0)
 	if ret != nvml.SUCCESS {
-		return fmt.Errorf("unable to get device at index 0: %v", nvml.ErrorString(ret))
+		return fmt.Errorf("failed to get device at index 0: %v", nvml.ErrorString(ret))
 	}
 
 	uuid, ret := device.GetUUID()
 	if ret != nvml.SUCCESS {
-		return fmt.Errorf("unable to get UUID of device: %v", nvml.ErrorString(ret))
+		return fmt.Errorf("failed to get UUID of device: %v", nvml.ErrorString(ret))
 	}
 
 	name, ret := device.GetName()
 	if ret != nvml.SUCCESS {
-		return fmt.Errorf("unable to get name of device: %v", nvml.ErrorString(ret))
+		return fmt.Errorf("failed to get name of device: %v", nvml.ErrorString(ret))
 	}
 
 	gpuUUID = uuid
@@ -335,7 +335,7 @@ func getDeviceHandle() (nvml.Device, error) {
 		var ret nvml.Return
 		cachedDevice, ret = nvml.DeviceGetHandleByUUID(gpuUUID)
 		if ret != nvml.SUCCESS {
-			initErr = fmt.Errorf("Failed to get device handle: %v", nvml.ErrorString(ret))
+			initErr = fmt.Errorf("failed to get device handle: %v", nvml.ErrorString(ret))
 		}
 	})
 	return cachedDevice, initErr
@@ -347,18 +347,10 @@ func getTemperature() int {
 	return int(temp)
 }
 
-func getCurrentFanSpeed() (int, error) {
-	device, err := getDeviceHandle()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get device handle: %w", err)
-	}
-
-	fanSpeed, ret := device.GetFanSpeed()
-	if ret != nvml.SUCCESS {
-		return 0, fmt.Errorf("failed to get fan speed: %v", nvml.ErrorString(ret))
-	}
-
-	return int(fanSpeed), nil
+func getCurrentFanSpeed() int {
+	device, _ := getDeviceHandle()
+	fanSpeed, _ := device.GetFanSpeed()
+	return int(fanSpeed)
 }
 
 func getMinMaxFanSpeed() error {
@@ -370,7 +362,7 @@ func getMinMaxFanSpeed() error {
 	device, _ := getDeviceHandle()
 	minSpeed, maxSpeed, ret := device.GetMinMaxFanSpeed()
 	if ret != nvml.SUCCESS {
-		return fmt.Errorf("Failed to get min/max fan speed: %v", nvml.ErrorString(ret))
+		return fmt.Errorf("failed to get min/max fan speed: %v", nvml.ErrorString(ret))
 	}
 
 	minFanSpeedLimit = int(minSpeed)
@@ -533,7 +525,7 @@ func setPowerLimit(powerLimit int) error {
 
 	ret := device.SetPowerManagementLimit(uint32(powerLimit * 1000)) // Convert watts to milliwatts
 	if ret != nvml.SUCCESS {
-		return fmt.Errorf("Failed to set power limit: %v", nvml.ErrorString(ret))
+		return fmt.Errorf("failed to set power limit: %v", nvml.ErrorString(ret))
 	}
 
 	debugLog("Power limit set successfully to %dW", powerLimit)
