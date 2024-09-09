@@ -23,7 +23,6 @@ import (
 )
 
 type Config struct {
-	// LogFile     string
 	Interval        int
 	Temp            int
 	FanSpeed        int
@@ -34,10 +33,11 @@ type Config struct {
 }
 
 const (
-	minTemp = 50
+	minTemp = 50 // Set fans to 0% below this temperature
 )
 
 var (
+	logger            *log.Logger
 	nvmlInitialized   bool
 	cachedDevice      nvml.Device
 	deviceSync        sync.Once
@@ -57,8 +57,12 @@ var (
 
 func init() {
 	log.Println("Initializing nvidiactl...")
+	flags := log.LstdFlags
+	if isRunningUnderSystemd() {
+		flags = 0 // Remove all flags to exclude timestamps
+	}
+	logger = log.New(os.Stdout, "", flags)
 
-	// flag.StringVar(&config.LogFile, "log", "nvidiactl.log", "Path to log file")
 	flag.IntVar(&config.Temp, "temperature", 80, "Maximum allowed temperature")
 	flag.IntVar(&config.Interval, "interval", 2, "Interval between updates")
 	flag.IntVar(&config.FanSpeed, "fanspeed", 100, "Maximum allowed fan speed")
@@ -78,7 +82,7 @@ func init() {
 			log.Fatalf("Error reading config file: %s", err)
 		}
 	} else {
-		log.Printf("Using config file: %s", viper.ConfigFileUsed())
+		logger.Printf("Using config file: %s", viper.ConfigFileUsed())
 	}
 
 	// Command-line args take precedence
@@ -100,14 +104,14 @@ func init() {
 
 			if field.Name == "Monitor" || field.Name == "Debug" {
 				if boolValue, ok := value.(bool); ok && boolValue {
-					log.Printf("	%s: %v", field.Name, value)
+					logger.Printf("	%s: %v", field.Name, value)
 				}
 			} else if field.Name == "PerformanceMode" {
-				log.Printf("	%s: %v", "Performance mode", value)
+				logger.Printf("	%s: %v", "Performance mode", value)
 			} else if field.Name == "FanSpeed" {
-				log.Printf("	%s: %v", "Fan speed", value)
+				logger.Printf("	%s: %v", "Fan speed", value)
 			} else if field.Name != "LogFile" {
-				log.Printf("	%s: %v", field.Name, value)
+				logger.Printf("	%s: %v", field.Name, value)
 			}
 		}
 	}
@@ -151,7 +155,7 @@ func initNvml() error {
 	}
 
 	gpuUUID = uuid
-	log.Printf("Detected GPU: %s\n", name)
+	logger.Printf("Detected GPU: %s\n", name)
 
 	// Initialize the cached device
 	if _, err := getDeviceHandle(); err != nil {
@@ -283,16 +287,16 @@ func loop(ctx context.Context) {
 
 			if config.Debug {
 				actualFanSpeed, _ := getCurrentFanSpeed()
-				log.Printf("  Temperature: current=%d°C, max=%d°C", currentTemp, config.Temp)
-				log.Printf("  Fan Speed: current=%d%%, target=%d%%, last=%d%%, max=%d%%",
+				logger.Printf("  Temperature: current=%d°C, max=%d°C", currentTemp, config.Temp)
+				logger.Printf("  Fan Speed: current=%d%%, target=%d%%, last=%d%%, max=%d%%",
 					actualFanSpeed, targetFanSpeed, lastFanSpeed, config.FanSpeed)
-				log.Printf("  Power Limit: current=%dW, min=%dW, max=%dW",
+				logger.Printf("  Power Limit: current=%dW, min=%dW, max=%dW",
 					currentPowerLimit, minPowerLimit, maxPowerLimit)
-				log.Printf("  Fan Limits: min=%d%%, max=%d%%", minFanSpeedLimit, maxFanSpeedLimit)
-				log.Printf("  Settings: hysteresis=%d, monitor=%v, performance=%v",
+				logger.Printf("  Fan Limits: min=%d%%, max=%d%%", minFanSpeedLimit, maxFanSpeedLimit)
+				logger.Printf("  Settings: hysteresis=%d, monitor=%v, performance=%v",
 					config.Hysteresis, config.Monitor, config.PerformanceMode)
 			} else {
-				log.Printf("Temperature: %d°C, Fan Speed: %d%%, Power Limit: %dW",
+				logger.Printf("Temperature: %d°C, Fan Speed: %d%%, Power Limit: %dW",
 					currentTemp, targetFanSpeed, currentPowerLimit)
 			}
 		}
@@ -314,9 +318,13 @@ func max(a, b int) int {
 	return b
 }
 
+func isRunningUnderSystemd() bool {
+	return os.Getenv("JOURNAL_STREAM") != ""
+}
+
 func debugLog(format string, v ...interface{}) {
 	if config.Debug {
-		log.Printf("Debug: "+format, v...)
+		logger.Printf("Debug: "+format, v...)
 	}
 }
 
@@ -432,7 +440,7 @@ func setFanSpeed(fanSpeed int) {
 	} else {
 		ret := nvml.DeviceSetFanSpeed_v2(device, 0, fanSpeed) // Assuming 0 is the first fan
 		if ret != nvml.SUCCESS {
-			log.Printf("Error setting fan speed: %v", nvml.ErrorString(ret))
+			logger.Printf("Error setting fan speed: %v", nvml.ErrorString(ret))
 		}
 	}
 	currentFanSpeed, _ := getCurrentFanSpeed()
@@ -454,7 +462,7 @@ func enableAutoFanControl() {
 
 	ret := nvml.DeviceSetDefaultFanSpeed_v2(device, 0)
 	if ret != nvml.SUCCESS {
-		log.Printf("Error setting default fan speed: %v", nvml.ErrorString(ret))
+		logger.Printf("Error setting default fan speed: %v", nvml.ErrorString(ret))
 	}
 }
 
