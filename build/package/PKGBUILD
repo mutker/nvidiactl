@@ -2,7 +2,7 @@
 
 pkgname=nvidiactl
 _pkgname=${pkgname%-git}
-pkgver=r1.6a07bf8
+pkgver=r6.72c1391
 pkgrel=1
 pkgdesc='A command-line tool providing automatic fan speed management and dynamic power limit adjustment for NVIDIA GPUs. It can optionally be run as a systemd service.'
 arch=('x86_64')

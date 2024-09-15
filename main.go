@@ -24,7 +24,7 @@ import (
 
 type Config struct {
 	Interval        int
-	Temp            int
+	Temperature     int
 	FanSpeed        int
 	Hysteresis      int
 	PerformanceMode bool
@@ -63,7 +63,7 @@ func init() {
 	}
 	logger = log.New(os.Stdout, "", flags)
 
-	flag.IntVar(&config.Temp, "temperature", 80, "Maximum allowed temperature")
+	flag.IntVar(&config.Temperature, "temperature", 80, "Maximum allowed temperature")
 	flag.IntVar(&config.Interval, "interval", 2, "Interval between updates")
 	flag.IntVar(&config.FanSpeed, "fanspeed", 100, "Maximum allowed fan speed")
 	flag.IntVar(&config.Hysteresis, "hysteresis", 2, "Temperature hysteresis")
@@ -263,14 +263,14 @@ func loop(ctx context.Context) {
 			setLastFanSpeed()
 
 			currentTemp := getTemperature()
-			targetFanSpeed := calculateFanSpeed(currentTemp, config.Temp, config.FanSpeed)
+			targetFanSpeed := calculateFanSpeed(currentTemp, config.Temperature, config.FanSpeed)
 
 			if !config.Monitor {
 				setFanSpeed(targetFanSpeed)
 			}
 
 			if !config.PerformanceMode {
-				powerAdjustment := calculatePowerLimit(currentTemp, config.Temp)
+				powerAdjustment := calculatePowerLimit(currentTemp, config.Temperature)
 				newPowerLimit := currentPowerLimit - powerAdjustment
 
 				// Ensure the new power limit is within the allowed range
@@ -287,7 +287,7 @@ func loop(ctx context.Context) {
 
 			if config.Debug {
 				actualFanSpeed, _ := getCurrentFanSpeed()
-				logger.Printf("  Temperature: current=%d°C, max=%d°C", currentTemp, config.Temp)
+				logger.Printf("  Temperature: current=%d°C, max=%d°C", currentTemp, config.Temperature)
 				logger.Printf("  Fan Speed: current=%d%%, target=%d%%, last=%d%%, max=%d%%",
 					actualFanSpeed, targetFanSpeed, lastFanSpeed, config.FanSpeed)
 				logger.Printf("  Power Limit: current=%dW, min=%dW, max=%dW",
@@ -347,10 +347,10 @@ func getTemperature() int {
 	return int(temp)
 }
 
-func getCurrentFanSpeed() int {
-	device, _ := getDeviceHandle()
+func getCurrentFanSpeed() (int, error) {
+	device, err := getDeviceHandle()
 	fanSpeed, _ := device.GetFanSpeed()
-	return int(fanSpeed)
+	return int(fanSpeed), err
 }
 
 func getMinMaxFanSpeed() error {
