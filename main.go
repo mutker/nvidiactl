@@ -33,7 +33,13 @@ type Config struct {
 }
 
 const (
-	minTemp = 45 // Set fans to 0% below this temperature
+	minTemp                 = 45  // Set fans to 0% below this temperature
+	maxPowerLimitAdjustment = 20  // Maximum power adjustment per cycle
+	wattPerDegree           = 2   // Watts to adjust per degree of temperature difference
+	defaultMaxTemp          = 80  // Default maximum temperature
+	defaultInterval         = 2   // Default interval between updates
+	defaultMaxFanSpeed      = 100 // Default maximum fan speed
+	defaultHysteresis       = 2   // Default temperature hysteresis
 )
 
 var (
@@ -63,10 +69,10 @@ func init() {
 	}
 	logger = log.New(os.Stdout, "", flags)
 
-	flag.IntVar(&config.Temperature, "temperature", 80, "Maximum allowed temperature")
-	flag.IntVar(&config.Interval, "interval", 2, "Interval between updates")
-	flag.IntVar(&config.FanSpeed, "fanspeed", 100, "Maximum allowed fan speed")
-	flag.IntVar(&config.Hysteresis, "hysteresis", 2, "Temperature hysteresis")
+	flag.IntVar(&config.Temperature, "temperature", defaultMaxTemp, "Maximum allowed temperature")
+	flag.IntVar(&config.Interval, "interval", defaultInterval, "Interval between updates")
+	flag.IntVar(&config.FanSpeed, "fanspeed", defaultMaxFanSpeed, "Maximum allowed fan speed")
+	flag.IntVar(&config.Hysteresis, "hysteresis", defaultHysteresis, "Temperature hysteresis")
 	flag.BoolVar(&config.PerformanceMode, "performance", false, "Performance mode: Do not adjust power limit to keep temperature below maximum")
 	flag.BoolVar(&config.Monitor, "monitor", false, "Only monitor temperature and fan speed")
 	flag.BoolVar(&config.Debug, "debug", false, "Enable debugging mode")
@@ -262,7 +268,7 @@ func loop(ctx context.Context) {
 		case <-ticker.C:
 			setLastFanSpeed()
 
-			currentTemp := getTemperature()
+			currentTemp := getCurrentTemperature()
 			targetFanSpeed := calculateFanSpeed(currentTemp, config.Temperature, config.FanSpeed)
 
 			if !config.Monitor {
@@ -274,7 +280,7 @@ func loop(ctx context.Context) {
 				newPowerLimit := currentPowerLimit - powerAdjustment
 
 				// Ensure the new power limit is within the allowed range
-				newPowerLimit = max(min(newPowerLimit, maxPowerLimit), minPowerLimit)
+				newPowerLimit = clamp(newPowerLimit, minPowerLimit, maxPowerLimit)
 
 				if newPowerLimit != currentPowerLimit {
 					currentPowerLimit = newPowerLimit
@@ -304,18 +310,14 @@ func loop(ctx context.Context) {
 }
 
 // Helper functions
-func min(a, b int) int {
-	if a < b {
-		return a
+func clamp(value, min, max int) int {
+	if value < min {
+		return min
 	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
+	if value > max {
+		return max
 	}
-	return b
+	return value
 }
 
 func isRunningUnderSystemd() bool {
@@ -341,7 +343,7 @@ func getDeviceHandle() (nvml.Device, error) {
 	return cachedDevice, initErr
 }
 
-func getTemperature() int {
+func getCurrentTemperature() int {
 	device, _ := getDeviceHandle()
 	temp, _ := device.GetTemperature(nvml.TEMPERATURE_GPU)
 	return int(temp)
@@ -377,48 +379,34 @@ func getMinMaxFanSpeed() error {
 }
 
 func calculateFanSpeed(currentTemp, maxTemp, maxFanSpeed int) int {
-
-	if currentTemp <= minTemp {
-		debugLog("Temperature (%d°C) below fan-off threshold (%d°C). Enabling auto fan control.", currentTemp, minTemp)
-		enableAutoFanControl()
-	}
-
-	if currentTemp >= maxTemp {
+	// Increase the fans to max as a precaution, in case temperature rises above maxTemp
+	if currentTemp > maxTemp {
 		debugLog("Temperature (%d°C) at or above max (%d°C). Setting fan speed to max (%d%%).", currentTemp, maxTemp, maxFanSpeed)
 		return maxFanSpeed
 	}
 
-	// Calculate the temperature range, starting from the fan-off temperature
-	tempRange := maxTemp - minTemp
+	tempRange := float64(maxTemp - minTemp)
+	tempPercentage := float64(currentTemp-minTemp) / tempRange
 
-	// Calculate the percentage of where the current temperature is in the range
-	tempPercentage := float64(currentTemp-minTemp) / float64(tempRange)
-
-	// Use a curve to calculate fan speed
-	// This will make the fan speed increase faster as it gets closer to the max temp
-	fanSpeedPercentage := math.Pow(tempPercentage, 2)
-
-	// Calculate the target fan speed
-	var targetFanSpeed int
-	if currentTemp < minTemp {
-		// Linear interpolation between 0 and minFanSpeedLimit
-		targetFanSpeed = int(float64(minFanSpeedLimit) * (float64(currentTemp-minTemp) / float64(minTemp-minTemp)))
+	var fanSpeedPercentage float64
+	if config.PerformanceMode {
+		// More aggressive curve for performance mode
+		fanSpeedPercentage = math.Pow(tempPercentage, 1.5)
 	} else {
-		// Use the curve calculation
-		targetFanSpeed = int(float64(maxFanSpeed-minFanSpeedLimit)*fanSpeedPercentage) + minFanSpeedLimit
+		// Original curve for normal mode
+		fanSpeedPercentage = math.Pow(tempPercentage, 2)
 	}
 
-	// Ensure the fan speed is within the valid range
-	targetFanSpeed = max(min(targetFanSpeed, maxFanSpeed), 0)
+	var targetFanSpeed int
+	targetFanSpeed = int(float64(maxFanSpeed-minFanSpeedLimit)*fanSpeedPercentage) + minFanSpeedLimit
+	targetFanSpeed = clamp(targetFanSpeed, minFanSpeedLimit, maxFanSpeed)
 
-	// Apply hysteresis
-	if applyHysteresis(targetFanSpeed, lastFanSpeed, config.Hysteresis) {
+	if applyHysteresis(targetFanSpeed, lastFanSpeed, config.Hysteresis, config.PerformanceMode) {
 		debugLog("Hysteresis applied. Keeping lastFanSpeed: %d%%", lastFanSpeed)
 		return lastFanSpeed
 	}
 
 	debugLog("New target fan speed: %d%%", targetFanSpeed)
-	lastFanSpeed = targetFanSpeed
 	return targetFanSpeed
 }
 
@@ -427,7 +415,9 @@ func setFanSpeed(fanSpeed int) {
 
 	debugLog("Attempting to set fan speed to %d%%", fanSpeed)
 
-	if fanSpeed == 0 {
+	currentTemp := getCurrentTemperature()
+	if currentTemp <= minTemp {
+		debugLog("Temperature (%d°C) below fan-off threshold (%d°C). Enabling auto fan control.", currentTemp, minTemp)
 		enableAutoFanControl()
 	} else {
 		ret := nvml.DeviceSetFanSpeed_v2(device, 0, fanSpeed) // Assuming 0 is the first fan
@@ -435,11 +425,20 @@ func setFanSpeed(fanSpeed int) {
 			logger.Printf("Error setting fan speed: %v", nvml.ErrorString(ret))
 		}
 	}
+
 	currentFanSpeed, _ := getCurrentFanSpeed()
 	debugLog("Current fan speed after setting: %d%%", currentFanSpeed)
 }
 
-func applyHysteresis(newSpeed, lastSpeed, hysteresis int) bool {
+func applyHysteresis(newSpeed, lastSpeed, hysteresis int, performanceMode bool) bool {
+	if performanceMode {
+		// In performance mode, prioritize GPU performance over noise reduction
+		if newSpeed > lastSpeed {
+			return newSpeed <= lastSpeed+hysteresis
+		}
+		return newSpeed >= lastSpeed-hysteresis*2
+	}
+	// Original hysteresis logic for normal mode
 	return (newSpeed >= lastSpeed-hysteresis) && (newSpeed <= lastSpeed+hysteresis)
 }
 
@@ -503,21 +502,8 @@ func getMinMaxPowerLimits() error {
 
 func calculatePowerLimit(currentTemp, targetTemp int) int {
 	tempDiff := currentTemp - targetTemp
-
-	// Define the maximum adjustment per cycle (e.g., 20W)
-	maxAdjustment := 20
-
-	// Calculate the adjustment proportionally
-	adjustment := tempDiff * 2 // 2W per degree of difference
-
-	// Clamp the adjustment to the maximum value
-	if adjustment > maxAdjustment {
-		adjustment = maxAdjustment
-	} else if adjustment < -maxAdjustment {
-		adjustment = -maxAdjustment
-	}
-
-	return adjustment
+	adjustment := tempDiff * wattPerDegree
+	return clamp(adjustment, -maxPowerLimitAdjustment, maxPowerLimitAdjustment)
 }
 
 func setPowerLimit(powerLimit int) error {
