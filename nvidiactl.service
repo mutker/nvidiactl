@@ -1,7 +1,6 @@
 [Unit]
-Description=nvidiactl
-Wants=syslog.target
-After=graphical.target
+Description=automatic fan speed management and dynamic power limit adjustment for NVIDIA GPUs
+PartOf=graphical-session.target
 
 [Service]
 Type=simple
