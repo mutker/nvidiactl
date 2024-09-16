@@ -184,10 +184,24 @@ func initializeFanSpeed() error {
 		return fmt.Errorf("failed to get min/max fan speed: %w", err)
 	}
 
+	// Add a small delay before querying the initial fan speed
+	time.Sleep(500 * time.Millisecond)
+
 	currentFanSpeed, err := getCurrentFanSpeed()
 	if err != nil {
 		return fmt.Errorf("failed to get current fan speed: %w", err)
 	}
+
+	// Verify the fan speed
+	if currentFanSpeed == minFanSpeedLimit {
+		// Double-check after a short delay
+		time.Sleep(500 * time.Millisecond)
+		currentFanSpeed, err = getCurrentFanSpeed()
+		if err != nil {
+			return fmt.Errorf("failed to get current fan speed on second attempt: %w", err)
+		}
+	}
+
 	lastFanSpeed = currentFanSpeed
 
 	debugLog("Initial fan speed: %d%%", lastFanSpeed)
@@ -351,8 +365,16 @@ func getCurrentTemperature() int {
 
 func getCurrentFanSpeed() (int, error) {
 	device, err := getDeviceHandle()
-	fanSpeed, _ := device.GetFanSpeed()
-	return int(fanSpeed), err
+	if err != nil {
+		return 0, fmt.Errorf("failed to get device handle: %w", err)
+	}
+
+	fanSpeed, ret := device.GetFanSpeed()
+	if ret != nvml.SUCCESS {
+		return 0, fmt.Errorf("failed to get fan speed: %v", nvml.ErrorString(ret))
+	}
+
+	return int(fanSpeed), nil
 }
 
 func getMinMaxFanSpeed() error {
