@@ -33,7 +33,7 @@ type Config struct {
 }
 
 const (
-	minTemp = 50 // Set fans to 0% below this temperature
+	minTemp = 45 // Set fans to 0% below this temperature
 )
 
 var (
