@@ -1,4 +1,3 @@
 .zed
 build/
-!build/package
 !build/ci
