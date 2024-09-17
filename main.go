@@ -22,16 +22,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-type Config struct {
-	Interval        int
-	Temperature     int
-	FanSpeed        int
-	Hysteresis      int
-	PerformanceMode bool
-	Monitor         bool
-	Debug           bool
-}
-
 const (
 	minTemp                 = 45  // Set fans to 0% below this temperature
 	maxPowerLimitAdjustment = 20  // Maximum power adjustment per cycle
@@ -59,6 +49,16 @@ var (
 	minPowerLimit     int
 	maxPowerLimit     int
 )
+
+type Config struct {
+	Interval        int
+	Temperature     int
+	FanSpeed        int
+	Hysteresis      int
+	PerformanceMode bool
+	Monitor         bool
+	Debug           bool
+}
 
 func init() {
 	log.Println("Initializing nvidiactl...")
