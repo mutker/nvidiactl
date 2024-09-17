@@ -43,22 +43,21 @@ const (
 )
 
 var (
-	logger            *log.Logger
 	nvmlInitialized   bool
-	cachedDevice      nvml.Device
+	config            Config
+	cacheDevice       nvml.Device
+	cacheFanSpeeds    bool
+	cachePowerLimits  bool
 	deviceSync        sync.Once
 	gpuUUID           string
-	config            Config
-	interval          int
+	logger            *log.Logger
+	lastFanSpeed      int
 	minFanSpeedLimit  int
 	maxFanSpeedLimit  int
-	lastFanSpeed      int
-	fanSpeedsCached   bool
+	currentPowerLimit int
 	defaultPowerLimit int
 	minPowerLimit     int
 	maxPowerLimit     int
-	currentPowerLimit int
-	powerLimitsCached bool
 )
 
 func init() {
@@ -218,7 +217,7 @@ func initializePowerLimits() error {
 	if err != nil {
 		return fmt.Errorf("failed to get current power limit: %w", err)
 	}
-	powerLimitsCached = true
+	cachePowerLimits = true
 
 	debugLog("Initial power limit: %dW", currentPowerLimit)
 	return nil
@@ -349,12 +348,12 @@ func getDeviceHandle() (nvml.Device, error) {
 	var initErr error
 	deviceSync.Do(func() {
 		var ret nvml.Return
-		cachedDevice, ret = nvml.DeviceGetHandleByUUID(gpuUUID)
+		cacheDevice, ret = nvml.DeviceGetHandleByUUID(gpuUUID)
 		if ret != nvml.SUCCESS {
 			initErr = fmt.Errorf("failed to get device handle: %v", nvml.ErrorString(ret))
 		}
 	})
-	return cachedDevice, initErr
+	return cacheDevice, initErr
 }
 
 func getCurrentTemperature() int {
@@ -379,7 +378,7 @@ func getCurrentFanSpeed() (int, error) {
 
 func getMinMaxFanSpeed() error {
 	// Return cached values if available
-	if fanSpeedsCached {
+	if cacheFanSpeeds {
 		return nil
 	}
 
@@ -393,7 +392,7 @@ func getMinMaxFanSpeed() error {
 	maxFanSpeedLimit = int(maxSpeed)
 
 	// Cache the results
-	fanSpeedsCached = true
+	cacheFanSpeeds = true
 
 	debugLog("Fan speed limits detected. Min: %d%%, Max: %d%%", minFanSpeedLimit, maxFanSpeedLimit)
 
@@ -495,7 +494,7 @@ func getCurrentPowerLimit() (int, error) {
 
 func getMinMaxPowerLimits() error {
 	// Return cached values if available
-	if powerLimitsCached {
+	if cachePowerLimits {
 		return nil
 	}
 
@@ -517,7 +516,7 @@ func getMinMaxPowerLimits() error {
 	debugLog("Power limits detected. Min: %dW, Max: %dW, Default: %dW", minPowerLimit, maxPowerLimit, defaultPowerLimit)
 
 	// Cache the results
-	powerLimitsCached = true
+	cachePowerLimits = true
 
 	return nil
 }

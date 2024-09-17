@@ -1,6 +1,6 @@
 # nvidiactl
 
-A command-line tool providing automatic fan speed management and dynamic power limit adjustment for NVIDIA GPUs. It can optionally be run as a systemd service.
+A tool providing dynamic fan speed and power limit adjustments for NVIDIA GPUs balance performance and noise. It can optionally be run as a systemd service.
 
 ## Features
 
@@ -22,7 +22,7 @@ Configuration can be done via a TOML file located at `/etc/nvidiactl.conf`, or t
 - `temperature`: Maximum allowed temperature (in Celsius)
 - `fanspeed`: Maximum allowed fan speed (in percent)
 - `hysteresis`: Temperature change required before adjusting fan speed (in Celsius)
-- `performance`: Enable performance mode, disabling power limit adjustments (boolean)
+- `performance`: Enable aggressive fan speed curve, and disable power limit adjustments (boolean)
 - `monitor`: Enable monitoring mode (boolean)
 - `debug`: Enable debug output (boolean)
 
