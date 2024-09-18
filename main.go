@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	minTemp                 = 45  // Set fans to 0% below this temperature
+	minTemp                 = 50  // Set fans to 0% below this temperature
 	maxPowerLimitAdjustment = 20  // Maximum power adjustment per cycle
 	wattPerDegree           = 2   // Watts to adjust per degree of temperature difference
 	defaultMaxTemp          = 80  // Default maximum temperature
