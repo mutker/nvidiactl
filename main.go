@@ -23,54 +23,77 @@ import (
 )
 
 const (
-	minTemperature          = 60
-	maxPowerLimitAdjustment = 20
-	wattPerDegree           = 5
-	defaultMaxTemperature   = 80
-	defaultInterval         = 2
-	defaultMaxFanSpeed      = 100
-	defaultHysteresis       = 2
+	minTemperature        = 50 // Minimum temperature (°C) before auto fan control is activated to allow zero RPM
+	powerLimitWindowSize  = 5  // Number of power limit readings to average
+	maxPowerLimitChange   = 10 // Maximum power limit adjustment (in watts) per interval
+	wattsPerDegree        = 5  // Power limit adjustment (in watts) per degree of temperature difference
+	temperatureWindowSize = 5  // Number of temperature readings to average
+	maxFanSpeedChange     = 5  // Maximum fan speed change per interval (in percentage points)
 )
 
+type Config struct {
+	Interval          int
+	Temperature       int
+	FanSpeed          int
+	Hysteresis        int
+	PerformanceMode   bool
+	Monitor           bool
+	Debug             bool
+	Verbose           bool
+	MaxTemperature    int `default:"80"`
+	DefaultInterval   int `default:"2"`
+	MaxFanSpeed       int `default:"100"`
+	DefaultHysteresis int `default:"4"`
+}
+
 var (
-	config            Config
-	nvmlInitialized   bool
-	logger            *log.Logger
-	sysLogger         *syslog.Writer
-	cacheDevice       nvml.Device
-	cacheFanSpeeds    bool
-	cachePowerLimits  bool
-	deviceSync        sync.Once
-	gpuUUID           string
-	lastFanSpeed      int
-	minFanSpeedLimit  int
-	maxFanSpeedLimit  int
+	config          Config
+	nvmlInitialized bool
+	autoFanControl  bool
+	logger          *log.Logger
+	sysLogger       *syslog.Writer
+	cacheGPU        nvml.Device
+	deviceSync      sync.Once
+	gpuUUID         string
+	gpuName         string
+	gpuFans         int
+
+	temperatureHistory []int
+	averageTemperature int
+	currentFanSpeed    int
+	lastFanSpeed       int
+	minFanSpeedLimit   int
+	maxFanSpeedLimit   int
+
+	powerLimitHistory []int
+	averagePowerLimit int
+	lastPowerLimit    int
 	currentPowerLimit int
 	defaultPowerLimit int
 	minPowerLimit     int
 	maxPowerLimit     int
 )
 
-type Config struct {
-	Interval        int
-	Temperature     int
-	FanSpeed        int
-	Hysteresis      int
-	PerformanceMode bool
-	Monitor         bool
-	Debug           bool
-	Verbose         bool
-}
-
 func init() {
+	log.Println("Initializing nvidiactl...")
 	initLogger()
 	initConfig()
 }
 
 func initLogger() error {
-	logger = log.New(os.Stdout, "", log.LstdFlags)
+	// Check if running as systemd service
+	isSystemd := os.Getenv("JOURNAL_STREAM") != ""
 
-	if config.Verbose {
+	if isSystemd {
+		// When running under systemd, log to stdout without timestamps
+		logger = log.New(os.Stdout, "", 0)
+	} else {
+		// For non-systemd environments, keep the existing logging setup
+		logger = log.New(os.Stdout, "", log.LstdFlags)
+	}
+
+	// Only initialize syslog if not running under systemd and verbose logging is enabled
+	if !isSystemd && config.Verbose {
 		var err error
 		sysLogger, err = syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "nvidiactl")
 		if err != nil {
@@ -82,14 +105,14 @@ func initLogger() error {
 }
 
 func initConfig() {
-	flag.IntVar(&config.Temperature, "temperature", defaultMaxTemperature, "Maximum allowed temperature")
-	flag.IntVar(&config.Interval, "interval", defaultInterval, "Interval between updates")
-	flag.IntVar(&config.FanSpeed, "fanspeed", defaultMaxFanSpeed, "Maximum allowed fan speed")
-	flag.IntVar(&config.Hysteresis, "hysteresis", defaultHysteresis, "Temperature hysteresis")
-	flag.BoolVar(&config.PerformanceMode, "performance", false, "Performance mode: Do not adjust power limit")
-	flag.BoolVar(&config.Monitor, "monitor", false, "Only monitor temperature and fan speed")
-	flag.BoolVar(&config.Debug, "debug", false, "Enable debugging mode")
-	flag.BoolVar(&config.Verbose, "verbose", false, "Enable verbose logging")
+	flag.IntVar(&config.Interval, "interval", config.Interval, "Interval between updates")
+	flag.IntVar(&config.Temperature, "temperature", config.Temperature, "Maximum allowed temperature")
+	flag.IntVar(&config.FanSpeed, "fanspeed", config.FanSpeed, "Maximum allowed fan speed")
+	flag.IntVar(&config.Hysteresis, "hysteresis", config.Hysteresis, "Temperature hysteresis")
+	flag.BoolVar(&config.PerformanceMode, "performance", config.PerformanceMode, "Performance mode: Do not adjust power limit")
+	flag.BoolVar(&config.Monitor, "monitor", config.Monitor, "Only monitor temperature and fan speed")
+	flag.BoolVar(&config.Debug, "debug", config.Debug, "Enable debugging mode")
+	flag.BoolVar(&config.Verbose, "verbose", config.Verbose, "Enable verbose logging")
 	flag.Parse()
 
 	viper.SetConfigName("nvidiactl.conf")
@@ -97,23 +120,27 @@ func initConfig() {
 	viper.AddConfigPath("/etc")
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			log.Fatalf("Error reading config file: %s", err)
+			log.Fatalf("failed to read config file: %s", err)
 		}
 	}
 
+	// Override config file values with command line flags
 	flag.Visit(func(f *flag.Flag) {
 		viper.Set(f.Name, f.Value.String())
 	})
 
+	// Unmarshal the configuration
 	if err := viper.Unmarshal(&config); err != nil {
-		log.Fatalf("Error unmarshaling config: %s", err)
+		log.Fatalf("failed to unmarshal config: %s", err)
 	}
+
+	// Initialize syslog if verbose logging is enabled
 
 	if config.Verbose {
 		var err error
 		sysLogger, err = syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "nvidiactl")
 		if err != nil {
-			logMessage("ERROR", "Failed to initialize syslog: %v", err)
+			logMessage("ERROR", "failed to initialize syslog: %v", err)
 			os.Exit(1)
 		}
 	}
@@ -122,7 +149,7 @@ func initConfig() {
 func initNvml() error {
 	ret := nvml.Init()
 	if ret != nvml.SUCCESS {
-		return logMessage("ERROR", "Failed to initialize NVML: %v", nvml.ErrorString(ret))
+		return logMessage("ERROR", "failed to initialize NVML: %v", nvml.ErrorString(ret))
 	}
 	nvmlInitialized = true
 	defer func() {
@@ -146,83 +173,89 @@ func initNvml() error {
 		return logMessage("ERROR", "failed to get device at index 0: %v", nvml.ErrorString(ret))
 	}
 
+	// Get GPU UUID
 	uuid, ret := device.GetUUID()
 	if ret != nvml.SUCCESS {
 		return logMessage("ERROR", "failed to get UUID of device: %v", nvml.ErrorString(ret))
 	}
+	gpuUUID = uuid
 
-	name, ret := device.GetName()
-	if ret != nvml.SUCCESS {
-		return logMessage("ERROR", "failed to get name of device: %v", nvml.ErrorString(ret))
+	// Get GPU friendly name
+	var err error
+	gpuName, err = getGPUName()
+	if err != nil {
+		return logMessage("ERROR", "failed to get name of device: %v", err)
 	}
 
-	gpuUUID = uuid
-	logMessage("INFO", "Detected GPU: %s", name)
+	// Get amount of GPU fans
+	gpuFans, err = getGPUFans()
+	if err != nil {
+		return logMessage("ERROR", "failed to get amount of fans: %v", err)
+	}
 
 	// Initialize the cached device
-	if _, err := getDeviceHandle(); err != nil {
-		return logMessage("ERROR", "failed to initialize cached device: %w", err)
+	if _, err := getGPUHandle(); err != nil {
+		return logMessage("ERROR", "failed to initialize cached device: %v", err)
 	}
 
-	if err := initializeFanSpeed(); err != nil {
+	// Detect fan speed limits
+	if err := initFanSpeed(); err != nil {
 		return err
 	}
 
-	if err := initializePowerLimits(); err != nil {
+	// Detect power limits
+	if err := initPowerLimits(); err != nil {
 		return err
 	}
 
+	logMessage("INFO", "Successfully initialized. Starting...")
 	return nil
 }
 
-func initializeFanSpeed() error {
+func initFanSpeed() error {
 	if err := getMinMaxFanSpeed(); err != nil {
-		return logMessage("ERROR", "failed to get min/max fan speed: %w", err)
+		return logMessage("ERROR", "failed to get min/max fan speed: %v", err)
 	}
 
 	// Add a small delay before querying the initial fan speed
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 
-	currentFanSpeed, err := getCurrentFanSpeed()
-	if err != nil {
-		return logMessage("ERROR", "failed to get current fan speed: %w", err)
-	}
-
-	// Verify the fan speed
-	if currentFanSpeed == minFanSpeedLimit {
-		// Double-check after a short delay
-		time.Sleep(500 * time.Millisecond)
-		currentFanSpeed, err = getCurrentFanSpeed()
+	for attempts := 0; attempts < 5; attempts++ {
+		currentFanSpeed, err := getCurrentFanSpeed()
 		if err != nil {
-			return logMessage("ERROR", "failed to get current fan speed on second attempt: %w", err)
+			logMessage("WARNING", "Attempt %d: failed to get current fan speed: %v", attempts+1, err)
+		} else if currentFanSpeed > 0 {
+			lastFanSpeed = currentFanSpeed
+			logMessage("INFO", "Initial fan speed detected: %d%%", lastFanSpeed)
+			return nil
 		}
+
+		logMessage("DEBUG", "Attempt %d: Fan speed read as 0, retrying...", attempts+1)
+		time.Sleep(1 * time.Second)
 	}
 
-	lastFanSpeed = currentFanSpeed
-
-	logMessage("DEBUG", "Initial fan speed: %d%%", lastFanSpeed)
-	return nil
+	return logMessage("ERROR", "failed to get a valid initial fan speed after multiple attempts")
 }
 
-func initializePowerLimits() error {
+func initPowerLimits() error {
 	if err := getMinMaxPowerLimits(); err != nil {
-		return logMessage("ERROR", "failed to get power limits: %w", err)
+		return logMessage("ERROR", "failed to get power limits: %v", err)
 	}
 
 	var err error
 	currentPowerLimit, err = getCurrentPowerLimit()
 	if err != nil {
-		return logMessage("ERROR", "failed to get current power limit: %w", err)
+		return logMessage("ERROR", "failed to get current power limit: %v", err)
 	}
-	cachePowerLimits = true
 
 	logMessage("DEBUG", "Initial power limit: %dW", currentPowerLimit)
+	setPowerLimit(defaultPowerLimit)
 	return nil
 }
 
 func main() {
 	if err := initLogger(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -252,22 +285,50 @@ func loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			currentTemperature, _ := getCurrentTemperature()
-			targetFanSpeed := calculateFanSpeed(currentTemperature, config.Temperature, config.FanSpeed)
-			targetPowerLimit := calculatePowerLimit(currentTemperature, config.Temperature)
+			currentFanSpeed, _ := getCurrentFanSpeed()
+
+			averageTemperature := updateTemperatureHistory(currentTemperature)
+			targetFanSpeed := calculateFanSpeed(averageTemperature, config.Temperature, config.FanSpeed)
+			averagePowerLimit := updatePowerLimitHistory(currentPowerLimit)
+			targetPowerLimit := calculatePowerLimit(averageTemperature, config.Temperature, currentFanSpeed, config.FanSpeed, currentPowerLimit)
 
 			if !config.Monitor {
-				newFanSpeed := applyHysteresis(targetFanSpeed, lastFanSpeed, config.Hysteresis)
-				if newFanSpeed != lastFanSpeed {
-					setFanSpeed(newFanSpeed)
-					lastFanSpeed = newFanSpeed
+				// Fan speed control logic
+				if averageTemperature <= minTemperature {
+					if !autoFanControl {
+						enableAutoFanControl()
+						autoFanControl = true
+					}
+				} else {
+					if autoFanControl {
+						logMessage("DEBUG", "Temperature (%d°C) above minimum (%d°C). Switching to manual fan control.", averageTemperature, minTemperature)
+						autoFanControl = false
+					}
+
+					if targetFanSpeed != currentFanSpeed && !applyHysteresis(targetFanSpeed, currentFanSpeed, config.Hysteresis, config.PerformanceMode) {
+						setFanSpeed(targetFanSpeed)
+					}
 				}
-				newPowerLimit := applyHysteresis(targetPowerLimit, currentPowerLimit, config.Hysteresis)
-				if newPowerLimit != currentPowerLimit {
-					setPowerLimit(newPowerLimit)
+
+				// Power limit adjustment
+				if !config.PerformanceMode {
+					averagePowerLimit := updatePowerLimitHistory(targetPowerLimit)
+					gradualPowerLimit := getGradualPowerLimit(averagePowerLimit, lastPowerLimit)
+
+					// Ensure we respect the minimum power limit
+					gradualPowerLimit = clamp(gradualPowerLimit, minPowerLimit, maxPowerLimit)
+
+					if gradualPowerLimit != currentPowerLimit {
+						setPowerLimit(gradualPowerLimit)
+						lastPowerLimit = gradualPowerLimit
+					}
+				} else if currentPowerLimit < maxPowerLimit {
+					setPowerLimit(maxPowerLimit)
+					targetPowerLimit = maxPowerLimit
 				}
 			}
 
-			logStatus(currentTemperature, lastFanSpeed, currentPowerLimit)
+			logStatus(currentTemperature, averageTemperature, currentFanSpeed, targetFanSpeed, currentPowerLimit, targetPowerLimit, averagePowerLimit)
 		}
 	}
 }
@@ -282,6 +343,7 @@ func handleSignals(cancel context.CancelFunc) {
 
 func cleanup() {
 	setPowerLimit(defaultPowerLimit)
+	enableAutoFanControl()
 	logMessage("INFO", "Exiting...")
 	if sysLogger != nil {
 		sysLogger.Close()
@@ -299,28 +361,42 @@ func clamp(value, min, max int) int {
 	return value
 }
 
-func abs(x int) int {
-	if x < 0 {
-		return -x
+func applyHysteresis(newSpeed, lastSpeed, hysteresis int, performanceMode bool) bool {
+	if performanceMode {
+		// In performance mode, allow changes more freely
+		return false
 	}
-	return x
+	// Hysteresis logic for normal mode
+	return (newSpeed >= lastSpeed-hysteresis) && (newSpeed <= lastSpeed+hysteresis)
 }
 
 // Logging functions
-func logStatus(temperature, fanSpeed, powerLimit int) {
+func logStatus(currentTemperature, averageTemperature, currentFanSpeed, targetFanSpeed, currentPowerLimit, targetPowerLimit, averagePowerLimit int) {
 	if config.Debug {
-		actualFanSpeed, _ := getCurrentFanSpeed()
-		logMessage("DEBUG", "Temperature: current=%d°C, max=%d°C", temperature, config.Temperature)
-		logMessage("DEBUG", "Fan Speed: current=%d%%, target=%d%%, last=%d%%, max=%d%%",
-			actualFanSpeed, fanSpeed, lastFanSpeed, config.FanSpeed)
-		logMessage("DEBUG", "Power Limit: current=%dW, min=%dW, max=%dW",
-			powerLimit, minPowerLimit, maxPowerLimit)
-		logMessage("DEBUG", "Fan Limits: min=%d%%, max=%d%%", minFanSpeedLimit, maxFanSpeedLimit)
-		logMessage("DEBUG", "Settings: hysteresis=%d, monitor=%v, performance=%v",
-			config.Hysteresis, config.Monitor, config.PerformanceMode)
+		logMessage("DEBUG", "current_fan_speed=%d target_fan_speed=%d last_set_fan_speed=%d max_fan_speed=%d current_temperature=%d average_temperature=%d min_temperature=%d max_temperature=%d current_power_limit=%d target_power_limit=%d average_power_limit=%d min_power_limit=%d max_power_limit=%d min_fan_speed=%d max_fan_speed=%d hysteresis=%d monitor=%t performance=%t auto_fan_control=%t",
+			currentFanSpeed,
+			targetFanSpeed,
+			lastFanSpeed,
+			config.FanSpeed,
+			currentTemperature,
+			averageTemperature,
+			minTemperature,
+			config.Temperature,
+			currentPowerLimit,
+			targetPowerLimit,
+			averagePowerLimit,
+			minPowerLimit,
+			maxPowerLimit,
+			minFanSpeedLimit,
+			maxFanSpeedLimit,
+			config.Hysteresis,
+			config.Monitor,
+			config.PerformanceMode,
+			autoFanControl,
+		)
 	} else if config.Verbose {
-		logMessage("INFO", "Temperature: %d°C, Fan Speed: %d%%, Power Limit: %dW",
-			temperature, fanSpeed, powerLimit)
+		logMessage("INFO", "fan_speed=%d temperature=%d (avg=%d) power_limit=%d (avg=%d)",
+			currentFanSpeed, currentTemperature, averageTemperature, currentPowerLimit, averagePowerLimit)
 	}
 }
 
@@ -328,9 +404,19 @@ func logMessage(level string, format string, v ...interface{}) error {
 	msg := fmt.Sprintf(format, v...)
 	logMsg := fmt.Sprintf("%s: %s", level, msg)
 
-	if config.Debug || (config.Verbose && level != "DEBUG") {
-		logger.Print(logMsg)
-		if sysLogger != nil {
+	isSystemd := os.Getenv("JOURNAL_STREAM") != ""
+
+	if level == "INFO" || config.Debug || (config.Verbose && level != "DEBUG") {
+		if isSystemd {
+			// When running under systemd, only log the message without the level prefix
+			logger.Print(msg)
+		} else {
+			// For non-systemd environments, log with the level prefix
+			logger.Print(logMsg)
+		}
+
+		// Only use syslog when not running under systemd
+		if sysLogger != nil && !isSystemd {
 			switch level {
 			case "DEBUG":
 				sysLogger.Debug(msg)
@@ -351,48 +437,79 @@ func logMessage(level string, format string, v ...interface{}) error {
 }
 
 // GPU functions
-func getDeviceHandle() (nvml.Device, error) {
+func getGPUHandle() (nvml.Device, error) {
 	var initErr error
 	deviceSync.Do(func() {
 		var ret nvml.Return
-		cacheDevice, ret = nvml.DeviceGetHandleByUUID(gpuUUID)
+		cacheGPU, ret = nvml.DeviceGetHandleByUUID(gpuUUID)
 		if ret != nvml.SUCCESS {
 			initErr = logMessage("ERROR", "failed to get device handle: %v", nvml.ErrorString(ret))
 		}
 	})
-	return cacheDevice, initErr
+	return cacheGPU, initErr
 }
 
 func getCurrentTemperature() (int, error) {
-	device, _ := getDeviceHandle()
+	device, _ := getGPUHandle()
 	temp, ret := device.GetTemperature(nvml.TEMPERATURE_GPU)
 	if ret != nvml.SUCCESS {
-		return 0, logMessage("ERROR", "failed to get temperature handle: %w", ret)
+		return 0, logMessage("ERROR", "failed to get temperature handle: %v", ret)
 	}
 	return int(temp), nil
 }
 
-func getCurrentFanSpeed() (int, error) {
-	device, err := getDeviceHandle()
-	if err != nil {
-		return 0, logMessage("ERROR", "failed to get device handle: %w", err)
+func updateTemperatureHistory(currentTemperature int) int {
+	temperatureHistory = append(temperatureHistory, currentTemperature)
+	if len(temperatureHistory) > temperatureWindowSize {
+		temperatureHistory = temperatureHistory[1:]
 	}
 
+	sum := 0
+	for _, temp := range temperatureHistory {
+		sum += temp
+	}
+	return sum / len(temperatureHistory)
+}
+
+func getCurrentFanSpeed() (int, error) {
+	device, err := getGPUHandle()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get device handle: %v", err)
+	}
+
+	// Try to get fan speed for each fan
+	for i := 0; i < gpuFans; i++ {
+		fanSpeed, ret := device.GetFanSpeed_v2(i)
+		if ret == nvml.SUCCESS && fanSpeed > 0 {
+			return int(fanSpeed), nil
+		}
+		logMessage("DEBUG", "GetFanSpeed_v2 for fan %d returned: %v", i, nvml.ErrorString(ret))
+	}
+
+	// If individual fan query fails, fall back to general GetFanSpeed
 	fanSpeed, ret := device.GetFanSpeed()
 	if ret != nvml.SUCCESS {
-		return 0, logMessage("ERROR", "failed to get fan speed: %v", nvml.ErrorString(ret))
+		return 0, fmt.Errorf("failed to get fan speed: %v", nvml.ErrorString(ret))
+	}
+
+	if fanSpeed == 0 {
+		logMessage("WARNING", "GetFanSpeed returned 0, which may be incorrect")
 	}
 
 	return int(fanSpeed), nil
 }
 
-func getMinMaxFanSpeed() error {
-	// Return cached values if available
-	if cacheFanSpeeds {
-		return nil
+func getGradualFanSpeed(targetFanSpeed, currentFanSpeed int) int {
+	if targetFanSpeed > currentFanSpeed {
+		return min(targetFanSpeed, currentFanSpeed+maxFanSpeedChange)
+	} else if targetFanSpeed < currentFanSpeed {
+		return max(targetFanSpeed, currentFanSpeed-maxFanSpeedChange)
 	}
+	return currentFanSpeed
+}
 
-	device, _ := getDeviceHandle()
+func getMinMaxFanSpeed() error {
+	device, _ := getGPUHandle()
 	minSpeed, maxSpeed, ret := device.GetMinMaxFanSpeed()
 	if ret != nvml.SUCCESS {
 		return logMessage("ERROR", "failed to get min/max fan speed: %v", nvml.ErrorString(ret))
@@ -401,79 +518,107 @@ func getMinMaxFanSpeed() error {
 	minFanSpeedLimit = int(minSpeed)
 	maxFanSpeedLimit = int(maxSpeed)
 
-	// Cache the results
-	cacheFanSpeeds = true
-
 	logMessage("DEBUG", "Fan speed limits detected. Min: %d%%, Max: %d%%", minFanSpeedLimit, maxFanSpeedLimit)
 
 	return nil
 }
 
-func calculateFanSpeed(currentTemperature, maxTemperature, maxFanSpeed int) int {
-	if currentTemperature <= minTemperature {
-		return minFanSpeedLimit
+func calculateFanSpeed(averageTemperature, maxTemperature, configMaxFanSpeed int) int {
+	// If temperature is at or below minimum, return 0 to indicate no change needed
+	if averageTemperature <= minTemperature {
+		return 0
 	}
-	if currentTemperature >= maxTemperature {
-		return maxFanSpeed
+
+	if averageTemperature <= minTemperature {
+		return 0
+	}
+
+	if averageTemperature >= maxTemperature {
+		return configMaxFanSpeed
 	}
 
 	tempRange := float64(maxTemperature - minTemperature)
-	tempPercentage := float64(currentTemperature-minTemperature) / tempRange
+	tempPercentage := float64(averageTemperature-minTemperature) / tempRange
 
-	var fanSpeedPercentage float64
-	if config.PerformanceMode {
-		// More aggressive curve for performance mode
-		fanSpeedPercentage = math.Pow(tempPercentage, 1.5)
-	} else {
-		// Original curve for normal mode
-		fanSpeedPercentage = math.Pow(tempPercentage, 2)
+	// Use a more gradual curve for fan speed increase
+	fanSpeedPercentage := math.Pow(tempPercentage, 1.5)
+	fanSpeedRange := configMaxFanSpeed - minFanSpeedLimit
+	targetFanSpeed := clamp(int(float64(fanSpeedRange)*fanSpeedPercentage)+minFanSpeedLimit, minFanSpeedLimit, configMaxFanSpeed)
+
+	return targetFanSpeed
+}
+
+func getGPUName() (string, error) {
+	device, err := getGPUHandle()
+	if err != nil {
+		return "", err
 	}
 
-	targetFanSpeed := int(float64(maxFanSpeed-minFanSpeedLimit)*fanSpeedPercentage) + minFanSpeedLimit
-	return clamp(targetFanSpeed, minFanSpeedLimit, maxFanSpeed)
+	name, ret := device.GetName()
+	if ret != nvml.SUCCESS {
+		return "", logMessage("ERROR", "failed to get GPU name: %v", nvml.ErrorString(ret))
+	}
+
+	logMessage("INFO", "Detected GPU: %s", name)
+	return name, nil
+}
+
+func getGPUFans() (int, error) {
+	device, err := getGPUHandle()
+	if err != nil {
+		return 0, err
+	}
+
+	count, ret := device.GetNumFans()
+	if ret != nvml.SUCCESS {
+		return 0, logMessage("ERROR", "failed to get number of fans: %v", nvml.ErrorString(ret))
+	}
+
+	logMessage("INFO", "Detected %d fans", count)
+	return int(count), nil
 }
 
 func setFanSpeed(fanSpeed int) {
-	device, _ := getDeviceHandle()
+	device, _ := getGPUHandle()
 
-	logMessage("DEBUG", "Setting fan speed to %d%%", fanSpeed)
-
-	ret := nvml.DeviceSetFanSpeed_v2(device, 0, fanSpeed) // Assuming 0 is the first fan
-	if ret != nvml.SUCCESS {
-		logMessage("INFO", "Error setting fan speed: %v", nvml.ErrorString(ret))
+	for i := 0; i < gpuFans; i++ {
+		ret := nvml.DeviceSetFanSpeed_v2(device, i, fanSpeed)
+		if ret != nvml.SUCCESS {
+			logMessage("INFO", "failed to set fan speed for fan%d: %v", i, nvml.ErrorString(ret))
+		}
 	}
 
 	currentFanSpeed, _ := getCurrentFanSpeed()
-	logMessage("DEBUG", "Current fan speed after setting: %d%%", currentFanSpeed)
 	lastFanSpeed = currentFanSpeed
+	logMessage("DEBUG", "Setting fan speed to %d%%", lastFanSpeed)
 }
 
-func applyHysteresis(newValue, currentValue, hysteresis int) int {
-	if abs(newValue-currentValue) <= hysteresis {
-		return currentValue
+func calculateFanSpeedPercentage(tempPercentage float64) float64 {
+	if config.PerformanceMode {
+		return math.Pow(tempPercentage, 1.5)
 	}
-	return newValue
+	return math.Pow(tempPercentage, 2)
 }
 
-func setLastFanSpeed() {
-	currentSpeed, _ := getCurrentFanSpeed()
-	lastFanSpeed = currentSpeed
-	logMessage("DEBUG", "Updated lastFanSpeed: %d%%", lastFanSpeed)
+func calculateTargetFanSpeed(fanSpeedPercentage float64, maxFanSpeed int) int {
+	fanSpeedRange := maxFanSpeed - minFanSpeedLimit
+	targetFanSpeed := int(float64(fanSpeedRange)*fanSpeedPercentage) + minFanSpeedLimit
+	return clamp(targetFanSpeed, minFanSpeedLimit, maxFanSpeed)
 }
 
 func enableAutoFanControl() {
-	device, _ := getDeviceHandle()
-
+	device, _ := getGPUHandle()
 	ret := nvml.DeviceSetDefaultFanSpeed_v2(device, 0)
 	if ret != nvml.SUCCESS {
-		logMessage("INFO", "Error setting default fan speed: %v", nvml.ErrorString(ret))
+		logMessage("ERROR", "failed to set default fan speed: %v", nvml.ErrorString(ret))
 	}
+	logMessage("DEBUG", "Temperature (%d°C) at or below minimum (%d°C). Enabling auto fan control.", averageTemperature, minTemperature)
 }
 
 func getCurrentPowerLimit() (int, error) {
-	device, err := getDeviceHandle()
+	device, err := getGPUHandle()
 	if err != nil {
-		return 0, logMessage("ERROR", "failed to get device handle: %w", err)
+		return 0, logMessage("ERROR", "failed to get device handle: %v", err)
 	}
 
 	powerLimit, ret := device.GetPowerManagementLimit()
@@ -485,12 +630,7 @@ func getCurrentPowerLimit() (int, error) {
 }
 
 func getMinMaxPowerLimits() error {
-	// Return cached values if available
-	if cachePowerLimits {
-		return nil
-	}
-
-	device, _ := getDeviceHandle()
+	device, _ := getGPUHandle()
 	minLimit, maxLimit, ret := device.GetPowerManagementLimitConstraints()
 	if ret != nvml.SUCCESS {
 		return logMessage("ERROR", "failed to get power management limit constraints: %v", nvml.ErrorString(ret))
@@ -507,39 +647,60 @@ func getMinMaxPowerLimits() error {
 
 	logMessage("DEBUG", "Power limits detected. Min: %dW, Max: %dW, Default: %dW", minPowerLimit, maxPowerLimit, defaultPowerLimit)
 
-	// Cache the results
-	cachePowerLimits = true
-
 	return nil
 }
 
-func calculatePowerLimit(currentTemperature, targetTemperature int) int {
+func calculatePowerLimit(currentTemperature, targetTemperature, currentFanSpeed, maxFanSpeed, currentPowerLimit int) int {
 	if config.PerformanceMode {
 		return maxPowerLimit
 	}
 
-	tempDiff := currentTemperature - targetTemperature
-	adjustment := tempDiff * wattPerDegree
-	newPowerLimit := currentPowerLimit - adjustment
+	if currentTemperature > targetTemperature && currentFanSpeed >= maxFanSpeed {
+		tempDiff := currentTemperature - targetTemperature
+		adjustment := min(tempDiff*wattsPerDegree, maxPowerLimitChange)
+		newPowerLimit := currentPowerLimit - adjustment
+		return clamp(newPowerLimit, minPowerLimit, maxPowerLimit)
+	}
 
-	return clamp(newPowerLimit, minPowerLimit, maxPowerLimit)
+	if currentTemperature <= targetTemperature && currentPowerLimit < maxPowerLimit {
+		return min(currentPowerLimit+wattsPerDegree, maxPowerLimit)
+	}
+
+	return currentPowerLimit
+}
+
+func updatePowerLimitHistory(newPowerLimit int) int {
+	powerLimitHistory = append(powerLimitHistory, newPowerLimit)
+	if len(powerLimitHistory) > powerLimitWindowSize {
+		powerLimitHistory = powerLimitHistory[1:]
+	}
+
+	sum := 0
+	for _, limit := range powerLimitHistory {
+		sum += limit
+	}
+	return sum / len(powerLimitHistory)
 }
 
 func setPowerLimit(powerLimit int) {
-	if powerLimit == currentPowerLimit {
-		return
-	}
-
-	device, _ := getDeviceHandle()
+	device, _ := getGPUHandle()
 	ret := device.SetPowerManagementLimit(uint32(powerLimit * 1000)) // Convert watts to milliwatts
 	if ret != nvml.SUCCESS {
-		logMessage("INFO", "Error setting power limit: %v", nvml.ErrorString(ret))
-		return
+		logMessage("ERROR", "Failed to set power limit to %dW: %v", powerLimit, nvml.ErrorString(ret))
+	} else {
+		currentPowerLimit = powerLimit
+		lastPowerLimit = powerLimit
+		logMessage("DEBUG", "Successfully set power limit to %dW", powerLimit)
 	}
+}
 
-	logMessage("INFO", "Setting power limit to %dW", powerLimit)
-	logMessage("DEBUG", "Power limit set successfully from %dW to %dW", currentPowerLimit, powerLimit)
-	currentPowerLimit = powerLimit
+func getGradualPowerLimit(targetPowerLimit, currentPowerLimit int) int {
+	if targetPowerLimit > currentPowerLimit {
+		return min(targetPowerLimit, currentPowerLimit+maxPowerLimitChange)
+	} else if targetPowerLimit < currentPowerLimit {
+		return max(targetPowerLimit, currentPowerLimit-maxPowerLimitChange)
+	}
+	return currentPowerLimit
 }
 
 func resetPowerLimit() {

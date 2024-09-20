@@ -10,6 +10,7 @@ A tool providing dynamic fan speed and power limit adjustments for NVIDIA GPUs, 
 - Hysteresis to prevent rapid fluctuations in fan speed
 - Performance mode to prioritize GPU performance over noise reduction
 - Monitoring mode for observing GPU stats without making changes
+- Supports logging to syslog and systemd journal
 - Direct interaction with NVIDIA GPUs using NVML (NVIDIA Management Library)
 
 ## Configuration
@@ -17,19 +18,19 @@ A tool providing dynamic fan speed and power limit adjustments for NVIDIA GPUs, 
 Configuration can be done via a TOML file located at `/etc/nvidiactl.conf`, or through command-line arguments. Command-line arguments take precedence over the config file.
 
 ```toml
-# Time between updates (in seconds, default: 5)
+# Time between updates (in seconds, default: 2)
 interval = 2
 
 # Maximum allowed temperature (in Celsius, default: 80)
 temperature = 80
 
-# Maximum allowed fan speed (in percent, default: 65)
-fanspeed = 65
+# Maximum allowed fan speed (in percent, default: 100)
+fanspeed = 100
 
-# Temperature change required before adjusting fan speed (in Celsius, default: 2)
-hysteresis = 2
+# Temperature change required before adjusting fan speed (in Celsius, default: 4)
+hysteresis = 4
 
-# Enable aggressive fan speed curve and disable power limit adjustments (boolean, default: false)
+# Enable performance mode - disables power limit adjustments (boolean, default: false)
 performance = false
 
 # Enable monitor mode - only monitor temperature and fan speed (boolean, default: false)
@@ -38,6 +39,8 @@ monitor = false
 # Enable debug mode - output detailed logging (boolean, default: false)
 debug = false
 
+# Enable verbose logging (boolean, default: false)
+verbose = false
 ```
 
 ## Usage
