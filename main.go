@@ -1,4 +1,4 @@
-// Copyright © 2024 Mutker Telag <witty.text5011@fastmail.com>
+// Copyright © 2024 Mutker Telag <dark.dusk53443@fastmail.com>
 //
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
