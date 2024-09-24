@@ -220,21 +220,14 @@ func initFanSpeed() error {
 	// Add a small delay before querying the initial fan speed
 	time.Sleep(1 * time.Second)
 
-	for attempts := 0; attempts < 5; attempts++ {
-		currentFanSpeed, err := getCurrentFanSpeed()
-		if err != nil {
-			logMessage("WARNING", "Attempt %d: failed to get current fan speed: %v", attempts+1, err)
-		} else if currentFanSpeed > 0 {
-			lastFanSpeed = currentFanSpeed
-			logMessage("INFO", "Initial fan speed detected: %d%%", lastFanSpeed)
-			return nil
-		}
-
-		logMessage("DEBUG", "Attempt %d: Fan speed read as 0, retrying...", attempts+1)
-		time.Sleep(1 * time.Second)
+	currentFanSpeed, err := getCurrentFanSpeed()
+	if err != nil {
+		logMessage("WARNING", "failed to get current fan speed: %v", err)
 	}
 
-	return logMessage("ERROR", "failed to get a valid initial fan speed after multiple attempts")
+	lastFanSpeed = currentFanSpeed
+	logMessage("INFO", "Initial fan speed detected: %d%%", lastFanSpeed)
+	return nil
 }
 
 func initPowerLimits() error {
@@ -492,9 +485,9 @@ func getCurrentFanSpeed() (int, error) {
 		return 0, fmt.Errorf("failed to get fan speed: %v", nvml.ErrorString(ret))
 	}
 
-	if fanSpeed == 0 {
-		logMessage("WARNING", "GetFanSpeed returned 0, which may be incorrect")
-	}
+	// if fanSpeed == 0 {
+	// 	logMessage("WARNING", "GetFanSpeed returned 0, which may be incorrect")
+	// }
 
 	return int(fanSpeed), nil
 }
