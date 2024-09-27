@@ -1,17 +1,22 @@
 # nvidiactl
 
-A tool providing dynamic fan speed and power limit adjustments for NVIDIA GPUs, balancing performance and noise. It can optionally be run as a systemd service.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Report Card](https://goreportcard.com/badge/codeberg.org/mutker/nvidiactl)](https://goreportcard.com/report/codeberg.org/mutker/nvidiactl)
+
+nvidiactl is a command-line tool providing automatic fan speed management and dynamic power limit adjustment for NVIDIA GPUs. It can optionally be run as a systemd service.
 
 ## Features
 
-- Automatic fan speed control based on GPU temperature
-- Dynamic power limit management to balance performance and noise
-- Customizable temperature thresholds and fan speed limits
-- Hysteresis to prevent rapid fluctuations in fan speed
-- Performance mode to prioritize GPU performance over noise reduction
-- Monitoring mode for observing GPU stats without making changes
-- Supports logging to syslog and systemd journal
-- Direct interaction with NVIDIA GPUs using NVML (NVIDIA Management Library)
+- 🌡️ **Automatic fan speed control** based on GPU temperature
+- ⚡ **Dynamic power limit management** to balance performance and noise
+- 🎛️ **Customizable temperature thresholds** and fan speed limits
+- 🔁 **Hysteresis support** to prevent rapid fluctuations in fan speed
+- 🚀 **Performance mode** to prioritize GPU performance over noise reduction
+- 📊 **Monitoring mode** for observing GPU stats without making changes
+- 📝 **Logging support** for syslog and systemd journal
+- 🔧 **Direct GPU interaction** using NVML (NVIDIA Management Library)
+- 🖥️ **Standalone application** or systemd service functionality
+- 🔍 **Debug mode** for detailed logging and troubleshooting
 
 ## Configuration
 
@@ -62,6 +67,26 @@ Enable monitoring mode (only prints statistics, with no change to fan speeds or 
 ```
 nvidiactl --monitor
 ```
+
+### Run a Systemd Service
+
+Copy `nvidiactl.server` to `/usr/lib/systemd/system/nvidiactl.service`, then enable and start the service with `sudo systemctl enable --now nvidiactl`
+
+```
+sudo cp nvidiactl.service /usr/lib/systemd/system/nvidiactl.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now nvidiactl.service
+```
+
+If you want to enable verbose or debug logging, add an overide with `sudo systemctl edit nvidiactl.conf`:
+
+```
+[Unit]
+ExecStart=
+ExecStart=/usr/bin/nvidiactl --verbose
+```
+
+Remember to reload systemd (`sudo systemctl daemon-reload`) and restart the service (`systemctl restart nvidiactl`).
 
 ## Building
 
