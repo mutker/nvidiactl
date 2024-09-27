@@ -7,9 +7,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"io"
 	"log/syslog"
 	"math"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
 )
 
@@ -50,7 +52,7 @@ var (
 	config          Config
 	nvmlInitialized bool
 	autoFanControl  bool
-	logger          *log.Logger
+	logger          zerolog.Logger
 	sysLogger       *syslog.Writer
 	cacheGPU        nvml.Device
 	deviceSync      sync.Once
@@ -75,82 +77,152 @@ var (
 )
 
 func init() {
-	log.Println("Initializing nvidiactl...")
-	initLogger()
-	initConfig()
+	if err := initLogger(); err != nil {
+		fmt.Errorf("failed to initialize logger")
+		os.Exit(1)
+	}
+
+	if err := initConfig(); err != nil {
+		logger.Fatal().Err(err).Msg("failed to initialize config")
+		os.Exit(1)
+	}
+
+	if err := initNvml(); err != nil {
+		logger.Fatal().Err(err).Msg("failed to initialize nvml")
+		os.Exit(1)
+	}
+
+	if err := initFanSpeed(); err != nil {
+		logger.Fatal().Err(err).Msg("failed to initialize fan speed")
+		os.Exit(1)
+	}
+
+	if err := initPowerLimits(); err != nil {
+		logger.Fatal().Err(err).Msg("failed to initialize power limits")
+		os.Exit(1)
+	}
 }
 
 func initLogger() error {
-	// Check if running as systemd service
-	isSystemd := os.Getenv("JOURNAL_STREAM") != ""
+	var err error
+	isService := false
 
-	if isSystemd {
-		// When running under systemd, log to stdout without timestamps
-		logger = log.New(os.Stdout, "", 0)
-	} else {
-		// For non-systemd environments, keep the existing logging setup
-		logger = log.New(os.Stdout, "", log.LstdFlags)
+	// Check if the process has a controlling terminal
+	if _, err := os.Stdin.Stat(); err != nil {
+		isService = true
 	}
 
-	// Only initialize syslog if not running under systemd and verbose logging is enabled
-	if !isSystemd && config.Verbose {
-		var err error
-		sysLogger, err = syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "nvidiactl")
-		if err != nil {
-			return fmt.Errorf("failed to initialize syslog: %v", err)
+	// Check for common service-related environment variables
+	if os.Getenv("SERVICE_NAME") != "" || os.Getenv("INVOCATION_ID") != "" {
+		isService = true
+	}
+
+	// Check if the parent process is init (PID 1)
+	if os.Getppid() == 1 {
+		isService = true
+	}
+
+	// Check if process group leader
+	if syscall.Getpgrp() == syscall.Getpid() {
+		isService = true
+	}
+
+	var output io.Writer
+
+	if isService {
+		// When running as a service, use Unix time format
+		zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+		output = os.Stdout
+	} else {
+		// When not running as a service, use console writer with RFC3339
+		output = zerolog.ConsoleWriter{
+			Out:        os.Stdout,
+			TimeFormat: time.RFC3339,
 		}
+	}
+
+	// Create the logger
+	logger = zerolog.New(output).With().Timestamp().Logger()
+	if err != nil {
+		fmt.Errorf("could not init logger")
+		os.Exit(1)
+	}
+
+	// Set global log level based on config
+	if config.Debug {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	} else if config.Verbose {
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	} else {
+		zerolog.SetGlobalLevel(zerolog.WarnLevel)
 	}
 
 	return nil
 }
 
-func initConfig() {
+func initConfig() error {
+	// Define flags
+	debugFlag := flag.Bool("debug", false, "Enable debugging mode")
+	verboseFlag := flag.Bool("verbose", false, "Enable verbose logging")
 	flag.IntVar(&config.Interval, "interval", config.Interval, "Interval between updates")
 	flag.IntVar(&config.Temperature, "temperature", config.Temperature, "Maximum allowed temperature")
 	flag.IntVar(&config.FanSpeed, "fanspeed", config.FanSpeed, "Maximum allowed fan speed")
 	flag.IntVar(&config.Hysteresis, "hysteresis", config.Hysteresis, "Temperature hysteresis")
 	flag.BoolVar(&config.PerformanceMode, "performance", config.PerformanceMode, "Performance mode: Do not adjust power limit")
 	flag.BoolVar(&config.Monitor, "monitor", config.Monitor, "Only monitor temperature and fan speed")
-	flag.BoolVar(&config.Debug, "debug", config.Debug, "Enable debugging mode")
-	flag.BoolVar(&config.Verbose, "verbose", config.Verbose, "Enable verbose logging")
+
+	// Parse flags
 	flag.Parse()
 
+	// Apply debug and verbose flags
+	config.Debug = *debugFlag
+	config.Verbose = *verboseFlag
+
+	// Load configuration from file
 	viper.SetConfigName("nvidiactl.conf")
 	viper.SetConfigType("toml")
 	viper.AddConfigPath("/etc")
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			log.Fatalf("failed to read config file: %s", err)
+			logger.Fatal().Err(err).Msg("failed to read config file")
 		}
 	}
 
 	// Override config file values with command line flags
+	viper.Set("debug", config.Debug)
+	viper.Set("verbose", config.Verbose)
 	flag.Visit(func(f *flag.Flag) {
 		viper.Set(f.Name, f.Value.String())
 	})
 
 	// Unmarshal the configuration
 	if err := viper.Unmarshal(&config); err != nil {
-		log.Fatalf("failed to unmarshal config: %s", err)
+		logger.Fatal().Err(err).Msg("failed to unmarshal config")
 	}
 
-	// Initialize syslog if verbose logging is enabled
-
-	if config.Verbose {
-		var err error
-		sysLogger, err = syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "nvidiactl")
-		if err != nil {
-			logMessage("ERROR", "failed to initialize syslog: %v", err)
-			os.Exit(1)
-		}
+	// Set log level based on config
+	if config.Debug {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+		logger.Debug().Msg("Debug logging enabled")
+	} else if config.Verbose {
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+		logger.Info().Msg("Verbose logging enabled")
+	} else {
+		zerolog.SetGlobalLevel(zerolog.WarnLevel)
 	}
+
+	logger.Debug().Interface("config", config).Msg("Configuration loaded")
+	return nil
 }
 
 func initNvml() error {
 	ret := nvml.Init()
 	if ret != nvml.SUCCESS {
-		return logMessage("ERROR", "failed to initialize NVML: %v", nvml.ErrorString(ret))
+		err := fmt.Errorf("failed to initialize nvml: %v", nvml.ErrorString(ret))
+		logger.Error().Err(err).Msg("nvml initialization failed")
+		return err
 	}
+
 	nvmlInitialized = true
 	defer func() {
 		if !nvmlInitialized {
@@ -160,23 +232,31 @@ func initNvml() error {
 
 	count, ret := nvml.DeviceGetCount()
 	if ret != nvml.SUCCESS {
-		return logMessage("ERROR", "failed to get device count: %v", nvml.ErrorString(ret))
+		err := fmt.Errorf("failed to get device count: %v", nvml.ErrorString(ret))
+		logger.Error().Err(err).Msg("failed to get device count")
+		return err
 	}
 
 	if count == 0 {
-		return logMessage("ERROR", "failed to find any NVIDIA GPUs")
+		err := fmt.Errorf("failed to find any NVIDIA GPUs")
+		logger.Error().Err(err).Msg("No NVIDIA GPUs found")
+		return err
 	}
 
 	// We'll use the first GPU (index 0)
 	device, ret := nvml.DeviceGetHandleByIndex(0)
 	if ret != nvml.SUCCESS {
-		return logMessage("ERROR", "failed to get device at index 0: %v", nvml.ErrorString(ret))
+		err := fmt.Errorf("failed to get device at index 0: %v", nvml.ErrorString(ret))
+		logger.Error().Err(err).Msg("failed to get device")
+		return err
 	}
 
 	// Get GPU UUID
 	uuid, ret := device.GetUUID()
 	if ret != nvml.SUCCESS {
-		return logMessage("ERROR", "failed to get UUID of device: %v", nvml.ErrorString(ret))
+		err := fmt.Errorf("failed to get UUID of device: %v", nvml.ErrorString(ret))
+		logger.Error().Err(err).Msg("failed to get GPU UUID")
+		return err
 	}
 	gpuUUID = uuid
 
@@ -184,18 +264,21 @@ func initNvml() error {
 	var err error
 	gpuName, err = getGPUName()
 	if err != nil {
-		return logMessage("ERROR", "failed to get name of device: %v", err)
+		logger.Error().Err(err).Msg("failed to get name of device")
+		return err
 	}
 
 	// Get amount of GPU fans
 	gpuFans, err = getGPUFans()
 	if err != nil {
-		return logMessage("ERROR", "failed to get amount of fans: %v", err)
+		logger.Error().Err(err).Msg("failed to get amount of fans")
+		return err
 	}
 
 	// Initialize the cached device
 	if _, err := getGPUHandle(); err != nil {
-		return logMessage("ERROR", "failed to initialize cached device: %v", err)
+		logger.Error().Err(err).Msg("failed to initialize cached device")
+		return err
 	}
 
 	// Detect fan speed limits
@@ -208,13 +291,13 @@ func initNvml() error {
 		return err
 	}
 
-	logMessage("INFO", "Successfully initialized. Starting...")
+	logger.Info().Msg("Successfully initialized. Starting...")
 	return nil
 }
 
 func initFanSpeed() error {
 	if err := getMinMaxFanSpeed(); err != nil {
-		return logMessage("ERROR", "failed to get min/max fan speed: %v", err)
+		logger.Fatal().Err(err).Msgf("failed to get min/max fan speed: %v", err)
 	}
 
 	// Add a small delay before querying the initial fan speed
@@ -222,49 +305,38 @@ func initFanSpeed() error {
 
 	currentFanSpeed, err := getCurrentFanSpeed()
 	if err != nil {
-		logMessage("WARNING", "failed to get current fan speed: %v", err)
+		logger.Fatal().Err(err).Msgf("failed to get current fan speed: %v", err)
 	}
 
 	lastFanSpeed = currentFanSpeed
-	logMessage("INFO", "Initial fan speed detected: %d%%", lastFanSpeed)
+	logger.Info().Msgf("Initial fan speed detected: %d%%", lastFanSpeed)
 	return nil
 }
 
 func initPowerLimits() error {
 	if err := getMinMaxPowerLimits(); err != nil {
-		return logMessage("ERROR", "failed to get power limits: %v", err)
+		logger.Fatal().Err(err).Msg("failed to get power limits")
+		return err
 	}
 
 	var err error
 	currentPowerLimit, err = getCurrentPowerLimit()
 	if err != nil {
-		return logMessage("ERROR", "failed to get current power limit: %v", err)
+		logger.Fatal().Err(err).Msg("failed to get current power limit")
+		return err
 	}
 
-	logMessage("DEBUG", "Initial power limit: %dW", currentPowerLimit)
+	logger.Debug().Msgf("Initial power limit: %dW", currentPowerLimit)
 	setPowerLimit(defaultPowerLimit)
 	return nil
 }
 
 func main() {
-	if err := initLogger(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
-		os.Exit(1)
-	}
-
-	if err := initNvml(); err != nil {
-		logMessage("ERROR", "Initialization failed: %v", err)
-		os.Exit(1)
-	}
 	defer nvml.Shutdown()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
 	go handleSignals(cancel)
-
 	loop(ctx)
-
 	cleanup()
 }
 
@@ -277,6 +349,7 @@ func loop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+
 			currentTemperature, _ := getCurrentTemperature()
 			currentFanSpeed, _ := getCurrentFanSpeed()
 
@@ -294,7 +367,7 @@ func loop(ctx context.Context) {
 					}
 				} else {
 					if autoFanControl {
-						logMessage("DEBUG", "Temperature (%d°C) above minimum (%d°C). Switching to manual fan control.", averageTemperature, minTemperature)
+						logger.Debug().Msgf("Temperature (%d°C) above minimum (%d°C). Switching to manual fan control.", averageTemperature, minTemperature)
 						autoFanControl = false
 					}
 
@@ -330,14 +403,14 @@ func handleSignals(cancel context.CancelFunc) {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	<-sigs
-	logMessage("INFO", "Received termination signal.")
+	logger.Info().Msg("Received termination signal.")
 	cancel()
 }
 
 func cleanup() {
 	setPowerLimit(defaultPowerLimit)
 	enableAutoFanControl()
-	logMessage("INFO", "Exiting...")
+	logger.Info().Msg("Exiting...")
 	if sysLogger != nil {
 		sysLogger.Close()
 	}
@@ -366,7 +439,8 @@ func applyHysteresis(newSpeed, lastSpeed, hysteresis int, performanceMode bool) 
 // Logging functions
 func logStatus(currentTemperature, averageTemperature, currentFanSpeed, targetFanSpeed, currentPowerLimit, targetPowerLimit, averagePowerLimit int) {
 	if config.Debug {
-		logMessage("DEBUG", "current_fan_speed=%d target_fan_speed=%d last_set_fan_speed=%d max_fan_speed=%d current_temperature=%d average_temperature=%d min_temperature=%d max_temperature=%d current_power_limit=%d target_power_limit=%d average_power_limit=%d min_power_limit=%d max_power_limit=%d min_fan_speed=%d max_fan_speed=%d hysteresis=%d monitor=%t performance=%t auto_fan_control=%t",
+
+		logger.Debug().Msgf("current_fan_speed=%d target_fan_speed=%d last_set_fan_speed=%d max_fan_speed=%d current_temperature=%d average_temperature=%d min_temperature=%d max_temperature=%d current_power_limit=%d target_power_limit=%d average_power_limit=%d min_power_limit=%d max_power_limit=%d min_fan_speed=%d max_fan_speed=%d hysteresis=%d monitor=%t performance=%t auto_fan_control=%t",
 			currentFanSpeed,
 			targetFanSpeed,
 			lastFanSpeed,
@@ -388,45 +462,9 @@ func logStatus(currentTemperature, averageTemperature, currentFanSpeed, targetFa
 			autoFanControl,
 		)
 	} else if config.Verbose {
-		logMessage("INFO", "fan_speed=%d temperature=%d (avg=%d) power_limit=%d (avg=%d)",
+		logger.Info().Msgf("fan_speed=%d temperature=%d (avg_temperature=%d) power_limit=%d (avg_power_limit=%d)",
 			currentFanSpeed, currentTemperature, averageTemperature, currentPowerLimit, averagePowerLimit)
 	}
-}
-
-func logMessage(level string, format string, v ...interface{}) error {
-	msg := fmt.Sprintf(format, v...)
-	logMsg := fmt.Sprintf("%s: %s", level, msg)
-
-	isSystemd := os.Getenv("JOURNAL_STREAM") != ""
-
-	if level == "INFO" || config.Debug || (config.Verbose && level != "DEBUG") {
-		if isSystemd {
-			// When running under systemd, only log the message without the level prefix
-			logger.Print(msg)
-		} else {
-			// For non-systemd environments, log with the level prefix
-			logger.Print(logMsg)
-		}
-
-		// Only use syslog when not running under systemd
-		if sysLogger != nil && !isSystemd {
-			switch level {
-			case "DEBUG":
-				sysLogger.Debug(msg)
-			case "INFO":
-				sysLogger.Info(msg)
-			case "WARNING":
-				sysLogger.Warning(msg)
-			case "ERROR":
-				sysLogger.Err(msg)
-			}
-		}
-	}
-
-	if level == "ERROR" {
-		return fmt.Errorf(msg)
-	}
-	return nil
 }
 
 // GPU functions
@@ -436,7 +474,8 @@ func getGPUHandle() (nvml.Device, error) {
 		var ret nvml.Return
 		cacheGPU, ret = nvml.DeviceGetHandleByUUID(gpuUUID)
 		if ret != nvml.SUCCESS {
-			initErr = logMessage("ERROR", "failed to get device handle: %v", nvml.ErrorString(ret))
+			initErr = fmt.Errorf("failed to get device handle: %v", nvml.ErrorString(ret))
+			logger.Error().Err(initErr).Msg("failed to get device handle")
 		}
 	})
 	return cacheGPU, initErr
@@ -446,7 +485,9 @@ func getCurrentTemperature() (int, error) {
 	device, _ := getGPUHandle()
 	temp, ret := device.GetTemperature(nvml.TEMPERATURE_GPU)
 	if ret != nvml.SUCCESS {
-		return 0, logMessage("ERROR", "failed to get temperature handle: %v", ret)
+		err := errors.New(nvml.ErrorString(ret))
+		logger.Error().Err(err).Msg("failed to get GPU temperature")
+		return 0, err
 	}
 	return int(temp), nil
 }
@@ -476,7 +517,6 @@ func getCurrentFanSpeed() (int, error) {
 		if ret == nvml.SUCCESS && fanSpeed > 0 {
 			return int(fanSpeed), nil
 		}
-		logMessage("DEBUG", "GetFanSpeed_v2 for fan %d returned: %v", i, nvml.ErrorString(ret))
 	}
 
 	// If individual fan query fails, fall back to general GetFanSpeed
@@ -484,10 +524,6 @@ func getCurrentFanSpeed() (int, error) {
 	if ret != nvml.SUCCESS {
 		return 0, fmt.Errorf("failed to get fan speed: %v", nvml.ErrorString(ret))
 	}
-
-	// if fanSpeed == 0 {
-	// 	logMessage("WARNING", "GetFanSpeed returned 0, which may be incorrect")
-	// }
 
 	return int(fanSpeed), nil
 }
@@ -505,13 +541,15 @@ func getMinMaxFanSpeed() error {
 	device, _ := getGPUHandle()
 	minSpeed, maxSpeed, ret := device.GetMinMaxFanSpeed()
 	if ret != nvml.SUCCESS {
-		return logMessage("ERROR", "failed to get min/max fan speed: %v", nvml.ErrorString(ret))
+		err := fmt.Errorf("failed to get min/max fan speed: %v", nvml.ErrorString(ret))
+		logger.Error().Err(err).Msg("failed to get fan speed limits")
+		return err
 	}
 
 	minFanSpeedLimit = int(minSpeed)
 	maxFanSpeedLimit = int(maxSpeed)
 
-	logMessage("DEBUG", "Fan speed limits detected. Min: %d%%, Max: %d%%", minFanSpeedLimit, maxFanSpeedLimit)
+	logger.Debug().Msgf("Fan speed limits detected. Min: %d%%, Max: %d%%", minFanSpeedLimit, maxFanSpeedLimit)
 
 	return nil
 }
@@ -549,10 +587,12 @@ func getGPUName() (string, error) {
 
 	name, ret := device.GetName()
 	if ret != nvml.SUCCESS {
-		return "", logMessage("ERROR", "failed to get GPU name: %v", nvml.ErrorString(ret))
+		err := errors.New(nvml.ErrorString(ret))
+		logger.Error().Err(err).Msg("failed to get GPU name")
+		return "", err
 	}
 
-	logMessage("INFO", "Detected GPU: %s", name)
+	logger.Info().Msgf("Detected GPU: %v", name)
 	return name, nil
 }
 
@@ -564,10 +604,12 @@ func getGPUFans() (int, error) {
 
 	count, ret := device.GetNumFans()
 	if ret != nvml.SUCCESS {
-		return 0, logMessage("ERROR", "failed to get number of fans: %v", nvml.ErrorString(ret))
+		err := fmt.Errorf("failed to get number of fans: %v", nvml.ErrorString(ret))
+		logger.Error().Err(err).Msg("failed to get GPU fan count")
+		return 0, err
 	}
 
-	logMessage("INFO", "Detected %d fans", count)
+	logger.Info().Msgf("Detected GPU fans: %d", count)
 	return int(count), nil
 }
 
@@ -577,13 +619,13 @@ func setFanSpeed(fanSpeed int) {
 	for i := 0; i < gpuFans; i++ {
 		ret := nvml.DeviceSetFanSpeed_v2(device, i, fanSpeed)
 		if ret != nvml.SUCCESS {
-			logMessage("INFO", "failed to set fan speed for fan%d: %v", i, nvml.ErrorString(ret))
+			logger.Info().Msgf("failed to set fan speed for fan%d: %v", i, nvml.ErrorString(ret))
 		}
 	}
 
 	currentFanSpeed, _ := getCurrentFanSpeed()
 	lastFanSpeed = currentFanSpeed
-	logMessage("DEBUG", "Setting fan speed to %d%%", lastFanSpeed)
+	logger.Debug().Msgf("Setting fan speed to %d%%", lastFanSpeed)
 }
 
 func calculateFanSpeedPercentage(tempPercentage float64) float64 {
@@ -603,20 +645,22 @@ func enableAutoFanControl() {
 	device, _ := getGPUHandle()
 	ret := nvml.DeviceSetDefaultFanSpeed_v2(device, 0)
 	if ret != nvml.SUCCESS {
-		logMessage("ERROR", "failed to set default fan speed: %v", nvml.ErrorString(ret))
+		logger.Error().Err(fmt.Errorf("%v", nvml.ErrorString(ret))).Msg("failed to set default fan speed")
 	}
-	logMessage("DEBUG", "Temperature (%d°C) at or below minimum (%d°C). Enabling auto fan control.", averageTemperature, minTemperature)
+	logger.Debug().Msgf("Temperature (%d°C) at or below minimum (%d°C). Enabling auto fan control.", averageTemperature, minTemperature)
 }
 
 func getCurrentPowerLimit() (int, error) {
 	device, err := getGPUHandle()
 	if err != nil {
-		return 0, logMessage("ERROR", "failed to get device handle: %v", err)
+		return 0, err
 	}
 
 	powerLimit, ret := device.GetPowerManagementLimit()
 	if ret != nvml.SUCCESS {
-		return 0, logMessage("ERROR", "failed to get current power limit: %v", nvml.ErrorString(ret))
+		err := fmt.Errorf("failed to get current power limit: %v", nvml.ErrorString(ret))
+		logger.Error().Err(err).Msg("failed to get current power limit")
+		return 0, err
 	}
 
 	return int(powerLimit / 1000), nil // Convert milliwatts to watts
@@ -626,19 +670,23 @@ func getMinMaxPowerLimits() error {
 	device, _ := getGPUHandle()
 	minLimit, maxLimit, ret := device.GetPowerManagementLimitConstraints()
 	if ret != nvml.SUCCESS {
-		return logMessage("ERROR", "failed to get power management limit constraints: %v", nvml.ErrorString(ret))
+		err := fmt.Errorf("failed to get power management limit constraints: %v", nvml.ErrorString(ret))
+		logger.Error().Err(err).Msg("failed to get power management limit constraints")
+		return err
 	}
 
 	defaultLimit, ret := device.GetPowerManagementDefaultLimit()
 	if ret != nvml.SUCCESS {
-		return logMessage("ERROR", "failed to get default power management limit: %v", nvml.ErrorString(ret))
+		err := fmt.Errorf("failed to get default power management limit: %v", nvml.ErrorString(ret))
+		logger.Error().Err(err).Msg("failed to get default power management limit")
+		return err
 	}
 
 	minPowerLimit = int(minLimit / 1000) // Convert from milliwatts to watts
 	maxPowerLimit = int(maxLimit / 1000)
 	defaultPowerLimit = int(defaultLimit / 1000)
 
-	logMessage("DEBUG", "Power limits detected. Min: %dW, Max: %dW, Default: %dW", minPowerLimit, maxPowerLimit, defaultPowerLimit)
+	logger.Debug().Msgf("Power limits detected. Min: %dW, Max: %dW, Default: %dW", minPowerLimit, maxPowerLimit, defaultPowerLimit)
 
 	return nil
 }
@@ -679,11 +727,12 @@ func setPowerLimit(powerLimit int) {
 	device, _ := getGPUHandle()
 	ret := device.SetPowerManagementLimit(uint32(powerLimit * 1000)) // Convert watts to milliwatts
 	if ret != nvml.SUCCESS {
-		logMessage("ERROR", "Failed to set power limit to %dW: %v", powerLimit, nvml.ErrorString(ret))
+		err := fmt.Errorf("failed to set power limit: %v", nvml.ErrorString(ret))
+		logger.Error().Err(err).Msg("failed to set power limit")
 	} else {
 		currentPowerLimit = powerLimit
 		lastPowerLimit = powerLimit
-		logMessage("DEBUG", "Successfully set power limit to %dW", powerLimit)
+		logger.Debug().Msg("Successfully set power limit")
 	}
 }
 
