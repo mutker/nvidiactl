@@ -439,31 +439,35 @@ func applyHysteresis(newSpeed, lastSpeed, hysteresis int, performanceMode bool) 
 // Logging functions
 func logStatus(currentTemperature, averageTemperature, currentFanSpeed, targetFanSpeed, currentPowerLimit, targetPowerLimit, averagePowerLimit int) {
 	if config.Debug {
-
-		logger.Debug().Msgf("current_fan_speed=%d target_fan_speed=%d last_set_fan_speed=%d max_fan_speed=%d current_temperature=%d average_temperature=%d min_temperature=%d max_temperature=%d current_power_limit=%d target_power_limit=%d average_power_limit=%d min_power_limit=%d max_power_limit=%d min_fan_speed=%d max_fan_speed=%d hysteresis=%d monitor=%t performance=%t auto_fan_control=%t",
-			currentFanSpeed,
-			targetFanSpeed,
-			lastFanSpeed,
-			config.FanSpeed,
-			currentTemperature,
-			averageTemperature,
-			minTemperature,
-			config.Temperature,
-			currentPowerLimit,
-			targetPowerLimit,
-			averagePowerLimit,
-			minPowerLimit,
-			maxPowerLimit,
-			minFanSpeedLimit,
-			maxFanSpeedLimit,
-			config.Hysteresis,
-			config.Monitor,
-			config.PerformanceMode,
-			autoFanControl,
-		)
+		logger.Debug().
+			Int("current_fan_speed", currentFanSpeed).
+			Int("target_fan_speed", targetFanSpeed).
+			Int("last_set_fan_speed", lastFanSpeed).
+			Int("max_fan_speed", config.FanSpeed).
+			Int("current_temperature", currentTemperature).
+			Int("average_temperature", averageTemperature).
+			Int("min_temperature", minTemperature).
+			Int("max_temperature", config.Temperature).
+			Int("current_power_limit", currentPowerLimit).
+			Int("target_power_limit", targetPowerLimit).
+			Int("average_power_limit", averagePowerLimit).
+			Int("min_power_limit", minPowerLimit).
+			Int("max_power_limit", maxPowerLimit).
+			Int("min_fan_speed", minFanSpeedLimit).
+			Int("max_fan_speed", maxFanSpeedLimit).
+			Int("hysteresis", config.Hysteresis).
+			Bool("monitor", config.Monitor).
+			Bool("performance", config.PerformanceMode).
+			Bool("auto_fan_control", autoFanControl).
+			Msg("")
 	} else if config.Verbose {
-		logger.Info().Msgf("fan_speed=%d temperature=%d (avg_temperature=%d) power_limit=%d (avg_power_limit=%d)",
-			currentFanSpeed, currentTemperature, averageTemperature, currentPowerLimit, averagePowerLimit)
+		logger.Info().
+			Int("fan_speed", currentFanSpeed).
+			Int("temperature", currentTemperature).
+			Int("avg_temperature", averageTemperature).
+			Int("power_limit", currentPowerLimit).
+			Int("avg_power_limit", averagePowerLimit).
+			Msg("")
 	}
 }
 
