@@ -78,7 +78,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now nvidiactl.service
 ```
 
-If you want to enable verbose or debug logging, add an overide with `sudo systemctl edit nvidiactl.conf`:
+If you want to enable verbose or debug logging, add an overide with `sudo systemctl edit nvidiactl`:
 
 ```
 [Unit]
