@@ -10,8 +10,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
-	"log"
 	"log/syslog"
 	"math"
 	"os"
@@ -21,6 +19,7 @@ import (
 	"time"
 
 	"codeberg.org/mutker/nvidiactl/internal/config"
+	"codeberg.org/mutker/nvidiactl/internal/logger"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
@@ -39,7 +38,6 @@ var (
 	cfg             *config.Config
 	nvmlInitialized bool
 	autoFanControl  bool
-	logger          zerolog.Logger
 	sysLogger       *syslog.Writer
 	cacheGPU        nvml.Device
 	deviceSync      sync.Once
@@ -67,80 +65,23 @@ func init() {
 	var err error
 	cfg, err = config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		logger.Fatal().Err(err).Msg("Failed to load config")
 	}
 
-	if err := initLogger(); err != nil {
-		logger.Fatal().Err(err).Msg("failed to initialize logger")
-		os.Exit(1)
-	}
+	// Initialize the logger
+	logger.Init(cfg.Debug, cfg.Verbose, logger.IsService())
 
 	if err := initNvml(); err != nil {
-		logger.Fatal().Err(err).Msg("failed to initialize nvml")
-		os.Exit(1)
+		logger.Fatal().Err(err).Msg("Failed to initialize NVML")
 	}
 
 	if err := initFanSpeed(); err != nil {
-		logger.Fatal().Err(err).Msg("failed to initialize fan speed")
-		os.Exit(1)
+		logger.Fatal().Err(err).Msg("Failed to initialize fan speed")
 	}
 
 	if err := initPowerLimits(); err != nil {
-		logger.Fatal().Err(err).Msg("failed to initialize power limits")
-		os.Exit(1)
+		logger.Fatal().Err(err).Msg("Failed to initialize power limits")
 	}
-}
-
-func initLogger() error {
-	isService := false
-
-	// Check if the process has a controlling terminal
-	if _, err := os.Stdin.Stat(); err != nil {
-		isService = true
-	}
-
-	// Check for common service-related environment variables
-	if os.Getenv("SERVICE_NAME") != "" || os.Getenv("INVOCATION_ID") != "" {
-		isService = true
-	}
-
-	// Check if the parent process is init (PID 1)
-	if os.Getppid() == 1 {
-		isService = true
-	}
-
-	// Check if process group leader
-	if syscall.Getpgrp() == syscall.Getpid() {
-		isService = true
-	}
-
-	var output io.Writer
-
-	if isService {
-		// When running as a service, use Unix time format
-		zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-		output = os.Stdout
-	} else {
-		// When not running as a service, use console writer with RFC3339
-		output = zerolog.ConsoleWriter{
-			Out:        os.Stdout,
-			TimeFormat: time.RFC3339,
-		}
-	}
-
-	// Create the logger
-	logger = zerolog.New(output).With().Timestamp().Logger()
-
-	// Set global log level based on config
-	if cfg.Debug {
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-	} else if cfg.Verbose {
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	} else {
-		zerolog.SetGlobalLevel(zerolog.WarnLevel)
-	}
-
-	return nil
 }
 
 func initConfig() error {
@@ -201,9 +142,7 @@ func initConfig() error {
 func initNvml() error {
 	ret := nvml.Init()
 	if ret != nvml.SUCCESS {
-		err := fmt.Errorf("failed to initialize nvml: %v", nvml.ErrorString(ret))
-		logger.Error().Err(err).Msg("nvml initialization failed")
-		return err
+		return fmt.Errorf("failed to initialize NVML: %v", nvml.ErrorString(ret))
 	}
 
 	nvmlInitialized = true
@@ -329,7 +268,7 @@ func loop(ctx context.Context) {
 
 	// Ensure INFO level logging for monitor mode
 	if cfg.Monitor {
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+		logger.Init(false, true, logger.IsService()) // Reinitialize logger with INFO level
 		logger.Info().Msg("Monitor mode activated. Logging GPU status...")
 	}
 
@@ -401,9 +340,6 @@ func cleanup() {
 	setPowerLimit(defaultPowerLimit)
 	enableAutoFanControl()
 	logger.Info().Msg("Exiting...")
-	if sysLogger != nil {
-		sysLogger.Close()
-	}
 }
 
 // Helper functions
