@@ -78,7 +78,7 @@ var (
 
 func init() {
 	if err := initLogger(); err != nil {
-		fmt.Errorf("failed to initialize logger")
+		logger.Fatal().Err(err).Msg("failed to initialize logger")
 		os.Exit(1)
 	}
 
@@ -104,7 +104,6 @@ func init() {
 }
 
 func initLogger() error {
-	var err error
 	isService := false
 
 	// Check if the process has a controlling terminal
@@ -143,10 +142,6 @@ func initLogger() error {
 
 	// Create the logger
 	logger = zerolog.New(output).With().Timestamp().Logger()
-	if err != nil {
-		fmt.Errorf("could not init logger")
-		os.Exit(1)
-	}
 
 	// Set global log level based on config
 	if config.Debug {
