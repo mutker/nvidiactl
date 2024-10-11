@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"log/syslog"
 	"math"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"codeberg.org/mutker/nvidiactl/internal/config"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
@@ -33,23 +35,8 @@ const (
 	maxFanSpeedChange     = 5  // Maximum fan speed change per interval (in percentage points)
 )
 
-type Config struct {
-	Interval          int
-	Temperature       int
-	FanSpeed          int
-	Hysteresis        int
-	PerformanceMode   bool
-	Monitor           bool
-	Debug             bool
-	Verbose           bool
-	MaxTemperature    int `default:"80"`
-	DefaultInterval   int `default:"2"`
-	MaxFanSpeed       int `default:"100"`
-	DefaultHysteresis int `default:"4"`
-}
-
 var (
-	config          Config
+	cfg             *config.Config
 	nvmlInitialized bool
 	autoFanControl  bool
 	logger          zerolog.Logger
@@ -77,13 +64,14 @@ var (
 )
 
 func init() {
-	if err := initLogger(); err != nil {
-		logger.Fatal().Err(err).Msg("failed to initialize logger")
-		os.Exit(1)
+	var err error
+	cfg, err = config.Load()
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	if err := initConfig(); err != nil {
-		logger.Fatal().Err(err).Msg("failed to initialize config")
+	if err := initLogger(); err != nil {
+		logger.Fatal().Err(err).Msg("failed to initialize logger")
 		os.Exit(1)
 	}
 
@@ -144,9 +132,9 @@ func initLogger() error {
 	logger = zerolog.New(output).With().Timestamp().Logger()
 
 	// Set global log level based on config
-	if config.Debug {
+	if cfg.Debug {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-	} else if config.Verbose {
+	} else if cfg.Verbose {
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	} else {
 		zerolog.SetGlobalLevel(zerolog.WarnLevel)
@@ -159,19 +147,19 @@ func initConfig() error {
 	// Define flags
 	debugFlag := flag.Bool("debug", false, "Enable debugging mode")
 	verboseFlag := flag.Bool("verbose", false, "Enable verbose logging")
-	flag.IntVar(&config.Interval, "interval", config.Interval, "Interval between updates")
-	flag.IntVar(&config.Temperature, "temperature", config.Temperature, "Maximum allowed temperature")
-	flag.IntVar(&config.FanSpeed, "fanspeed", config.FanSpeed, "Maximum allowed fan speed")
-	flag.IntVar(&config.Hysteresis, "hysteresis", config.Hysteresis, "Temperature hysteresis")
-	flag.BoolVar(&config.PerformanceMode, "performance", config.PerformanceMode, "Performance mode: Do not adjust power limit")
-	flag.BoolVar(&config.Monitor, "monitor", config.Monitor, "Only monitor temperature and fan speed")
+	flag.IntVar(&cfg.Interval, "interval", cfg.Interval, "Interval between updates")
+	flag.IntVar(&cfg.Temperature, "temperature", cfg.Temperature, "Maximum allowed temperature")
+	flag.IntVar(&cfg.FanSpeed, "fanspeed", cfg.FanSpeed, "Maximum allowed fan speed")
+	flag.IntVar(&cfg.Hysteresis, "hysteresis", cfg.Hysteresis, "Temperature hysteresis")
+	flag.BoolVar(&cfg.PerformanceMode, "performance", cfg.PerformanceMode, "Performance mode: Do not adjust power limit")
+	flag.BoolVar(&cfg.Monitor, "monitor", cfg.Monitor, "Only monitor temperature and fan speed")
 
 	// Parse flags
 	flag.Parse()
 
 	// Apply debug and verbose flags
-	config.Debug = *debugFlag
-	config.Verbose = *verboseFlag
+	cfg.Debug = *debugFlag
+	cfg.Verbose = *verboseFlag
 
 	// Load configuration from file
 	viper.SetConfigName("nvidiactl.conf")
@@ -184,29 +172,29 @@ func initConfig() error {
 	}
 
 	// Override config file values with command line flags
-	viper.Set("debug", config.Debug)
-	viper.Set("verbose", config.Verbose)
+	viper.Set("debug", cfg.Debug)
+	viper.Set("verbose", cfg.Verbose)
 	flag.Visit(func(f *flag.Flag) {
 		viper.Set(f.Name, f.Value.String())
 	})
 
 	// Unmarshal the configuration
-	if err := viper.Unmarshal(&config); err != nil {
+	if err := viper.Unmarshal(&cfg); err != nil {
 		logger.Fatal().Err(err).Msg("failed to unmarshal config")
 	}
 
 	// Set log level based on config
-	if config.Debug {
+	if cfg.Debug {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 		logger.Debug().Msg("Debug logging enabled")
-	} else if config.Verbose {
+	} else if cfg.Verbose {
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
 		logger.Info().Msg("Verbose logging enabled")
 	} else {
 		zerolog.SetGlobalLevel(zerolog.WarnLevel)
 	}
 
-	logger.Debug().Interface("config", config).Msg("Configuration loaded")
+	logger.Debug().Interface("config", cfg).Msg("Configuration loaded")
 	return nil
 }
 
@@ -336,7 +324,7 @@ func main() {
 }
 
 func loop(ctx context.Context) {
-	ticker := time.NewTicker(time.Second * time.Duration(config.Interval))
+	ticker := time.NewTicker(time.Second * time.Duration(cfg.Interval))
 	defer ticker.Stop()
 
 	for {
@@ -349,11 +337,11 @@ func loop(ctx context.Context) {
 			currentFanSpeed, _ := getCurrentFanSpeed()
 
 			averageTemperature := updateTemperatureHistory(currentTemperature)
-			targetFanSpeed := calculateFanSpeed(averageTemperature, config.Temperature, config.FanSpeed)
+			targetFanSpeed := calculateFanSpeed(averageTemperature, cfg.Temperature, cfg.FanSpeed)
 			averagePowerLimit := updatePowerLimitHistory(currentPowerLimit)
-			targetPowerLimit := calculatePowerLimit(averageTemperature, config.Temperature, currentFanSpeed, config.FanSpeed, currentPowerLimit)
+			targetPowerLimit := calculatePowerLimit(averageTemperature, cfg.Temperature, currentFanSpeed, cfg.FanSpeed, currentPowerLimit)
 
-			if !config.Monitor {
+			if !cfg.Monitor {
 				// Fan speed control logic
 				if averageTemperature <= minTemperature {
 					if !autoFanControl {
@@ -366,13 +354,13 @@ func loop(ctx context.Context) {
 						autoFanControl = false
 					}
 
-					if targetFanSpeed != currentFanSpeed && !applyHysteresis(targetFanSpeed, currentFanSpeed, config.Hysteresis, config.PerformanceMode) {
+					if targetFanSpeed != currentFanSpeed && !applyHysteresis(targetFanSpeed, currentFanSpeed, cfg.Hysteresis, cfg.PerformanceMode) {
 						setFanSpeed(targetFanSpeed)
 					}
 				}
 
 				// Power limit adjustment
-				if !config.PerformanceMode {
+				if !cfg.PerformanceMode {
 					averagePowerLimit := updatePowerLimitHistory(targetPowerLimit)
 					gradualPowerLimit := getGradualPowerLimit(averagePowerLimit, lastPowerLimit)
 
@@ -433,16 +421,16 @@ func applyHysteresis(newSpeed, lastSpeed, hysteresis int, performanceMode bool) 
 
 // Logging functions
 func logStatus(currentTemperature, averageTemperature, currentFanSpeed, targetFanSpeed, currentPowerLimit, targetPowerLimit, averagePowerLimit int) {
-	if config.Debug {
+	if cfg.Debug {
 		logger.Debug().
 			Int("current_fan_speed", currentFanSpeed).
 			Int("target_fan_speed", targetFanSpeed).
 			Int("last_set_fan_speed", lastFanSpeed).
-			Int("max_fan_speed", config.FanSpeed).
+			Int("max_fan_speed", cfg.FanSpeed).
 			Int("current_temperature", currentTemperature).
 			Int("average_temperature", averageTemperature).
 			Int("min_temperature", minTemperature).
-			Int("max_temperature", config.Temperature).
+			Int("max_temperature", cfg.Temperature).
 			Int("current_power_limit", currentPowerLimit).
 			Int("target_power_limit", targetPowerLimit).
 			Int("average_power_limit", averagePowerLimit).
@@ -450,12 +438,12 @@ func logStatus(currentTemperature, averageTemperature, currentFanSpeed, targetFa
 			Int("max_power_limit", maxPowerLimit).
 			Int("min_fan_speed", minFanSpeedLimit).
 			Int("max_fan_speed", maxFanSpeedLimit).
-			Int("hysteresis", config.Hysteresis).
-			Bool("monitor", config.Monitor).
-			Bool("performance", config.PerformanceMode).
+			Int("hysteresis", cfg.Hysteresis).
+			Bool("monitor", cfg.Monitor).
+			Bool("performance", cfg.PerformanceMode).
 			Bool("auto_fan_control", autoFanControl).
 			Msg("")
-	} else if config.Verbose {
+	} else if cfg.Verbose {
 		logger.Info().
 			Int("fan_speed", currentFanSpeed).
 			Int("temperature", currentTemperature).
@@ -478,6 +466,40 @@ func getGPUHandle() (nvml.Device, error) {
 		}
 	})
 	return cacheGPU, initErr
+}
+
+func getGPUName() (string, error) {
+	device, err := getGPUHandle()
+	if err != nil {
+		return "", err
+	}
+
+	name, ret := device.GetName()
+	if ret != nvml.SUCCESS {
+		err := errors.New(nvml.ErrorString(ret))
+		logger.Error().Err(err).Msg("failed to get GPU name")
+		return "", err
+	}
+
+	logger.Info().Msgf("Detected GPU: %v", name)
+	return name, nil
+}
+
+func getGPUFans() (int, error) {
+	device, err := getGPUHandle()
+	if err != nil {
+		return 0, err
+	}
+
+	count, ret := device.GetNumFans()
+	if ret != nvml.SUCCESS {
+		err := fmt.Errorf("failed to get number of fans: %v", nvml.ErrorString(ret))
+		logger.Error().Err(err).Msg("failed to get GPU fan count")
+		return 0, err
+	}
+
+	logger.Info().Msgf("Detected GPU fans: %d", count)
+	return int(count), nil
 }
 
 func getCurrentTemperature() (int, error) {
@@ -553,65 +575,6 @@ func getMinMaxFanSpeed() error {
 	return nil
 }
 
-func calculateFanSpeed(averageTemperature, maxTemperature, configMaxFanSpeed int) int {
-	// If temperature is at or below minimum, return 0 to indicate no change needed
-	if averageTemperature <= minTemperature {
-		return 0
-	}
-
-	if averageTemperature <= minTemperature {
-		return 0
-	}
-
-	if averageTemperature >= maxTemperature {
-		return configMaxFanSpeed
-	}
-
-	tempRange := float64(maxTemperature - minTemperature)
-	tempPercentage := float64(averageTemperature-minTemperature) / tempRange
-
-	// Use a more gradual curve for fan speed increase
-	fanSpeedPercentage := math.Pow(tempPercentage, 1.5)
-	fanSpeedRange := configMaxFanSpeed - minFanSpeedLimit
-	targetFanSpeed := clamp(int(float64(fanSpeedRange)*fanSpeedPercentage)+minFanSpeedLimit, minFanSpeedLimit, configMaxFanSpeed)
-
-	return targetFanSpeed
-}
-
-func getGPUName() (string, error) {
-	device, err := getGPUHandle()
-	if err != nil {
-		return "", err
-	}
-
-	name, ret := device.GetName()
-	if ret != nvml.SUCCESS {
-		err := errors.New(nvml.ErrorString(ret))
-		logger.Error().Err(err).Msg("failed to get GPU name")
-		return "", err
-	}
-
-	logger.Info().Msgf("Detected GPU: %v", name)
-	return name, nil
-}
-
-func getGPUFans() (int, error) {
-	device, err := getGPUHandle()
-	if err != nil {
-		return 0, err
-	}
-
-	count, ret := device.GetNumFans()
-	if ret != nvml.SUCCESS {
-		err := fmt.Errorf("failed to get number of fans: %v", nvml.ErrorString(ret))
-		logger.Error().Err(err).Msg("failed to get GPU fan count")
-		return 0, err
-	}
-
-	logger.Info().Msgf("Detected GPU fans: %d", count)
-	return int(count), nil
-}
-
 func setFanSpeed(fanSpeed int) {
 	device, _ := getGPUHandle()
 
@@ -627,8 +590,27 @@ func setFanSpeed(fanSpeed int) {
 	logger.Debug().Msgf("Setting fan speed to %d%%", lastFanSpeed)
 }
 
+func calculateFanSpeed(averageTemperature, maxTemperature, configMaxFanSpeed int) int {
+	if averageTemperature <= minTemperature {
+		return 0
+	}
+
+	if averageTemperature >= maxTemperature {
+		return configMaxFanSpeed
+	}
+
+	tempRange := float64(maxTemperature - minTemperature)
+	tempPercentage := float64(averageTemperature-minTemperature) / tempRange
+
+	fanSpeedPercentage := calculateFanSpeedPercentage(tempPercentage)
+	fanSpeedRange := configMaxFanSpeed - minFanSpeedLimit
+	targetFanSpeed := clamp(int(float64(fanSpeedRange)*fanSpeedPercentage)+minFanSpeedLimit, minFanSpeedLimit, configMaxFanSpeed)
+
+	return targetFanSpeed
+}
+
 func calculateFanSpeedPercentage(tempPercentage float64) float64 {
-	if config.PerformanceMode {
+	if cfg.PerformanceMode {
 		return math.Pow(tempPercentage, 1.5)
 	}
 	return math.Pow(tempPercentage, 2)
@@ -691,7 +673,7 @@ func getMinMaxPowerLimits() error {
 }
 
 func calculatePowerLimit(currentTemperature, targetTemperature, currentFanSpeed, maxFanSpeed, currentPowerLimit int) int {
-	if config.PerformanceMode {
+	if cfg.PerformanceMode {
 		return maxPowerLimit
 	}
 
