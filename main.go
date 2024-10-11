@@ -327,21 +327,28 @@ func loop(ctx context.Context) {
 	ticker := time.NewTicker(time.Second * time.Duration(cfg.Interval))
 	defer ticker.Stop()
 
+	// Ensure INFO level logging for monitor mode
+	if cfg.Monitor {
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+		logger.Info().Msg("Monitor mode activated. Logging GPU status...")
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-
 			currentTemperature, _ := getCurrentTemperature()
 			currentFanSpeed, _ := getCurrentFanSpeed()
+			currentPowerLimit, _ := getCurrentPowerLimit()
 
 			averageTemperature := updateTemperatureHistory(currentTemperature)
-			targetFanSpeed := calculateFanSpeed(averageTemperature, cfg.Temperature, cfg.FanSpeed)
 			averagePowerLimit := updatePowerLimitHistory(currentPowerLimit)
-			targetPowerLimit := calculatePowerLimit(averageTemperature, cfg.Temperature, currentFanSpeed, cfg.FanSpeed, currentPowerLimit)
 
 			if !cfg.Monitor {
+				targetFanSpeed := calculateFanSpeed(averageTemperature, cfg.Temperature, cfg.FanSpeed)
+				targetPowerLimit := calculatePowerLimit(averageTemperature, cfg.Temperature, currentFanSpeed, cfg.FanSpeed, currentPowerLimit)
+
 				// Fan speed control logic
 				if averageTemperature <= minTemperature {
 					if !autoFanControl {
@@ -361,23 +368,23 @@ func loop(ctx context.Context) {
 
 				// Power limit adjustment
 				if !cfg.PerformanceMode {
-					averagePowerLimit := updatePowerLimitHistory(targetPowerLimit)
 					gradualPowerLimit := getGradualPowerLimit(averagePowerLimit, lastPowerLimit)
-
-					// Ensure we respect the minimum power limit
 					gradualPowerLimit = clamp(gradualPowerLimit, minPowerLimit, maxPowerLimit)
 
 					if gradualPowerLimit != currentPowerLimit {
 						setPowerLimit(gradualPowerLimit)
 						lastPowerLimit = gradualPowerLimit
+						currentPowerLimit = gradualPowerLimit
 					}
 				} else if currentPowerLimit < maxPowerLimit {
 					setPowerLimit(maxPowerLimit)
-					targetPowerLimit = maxPowerLimit
+					currentPowerLimit = maxPowerLimit
 				}
-			}
 
-			logStatus(currentTemperature, averageTemperature, currentFanSpeed, targetFanSpeed, currentPowerLimit, targetPowerLimit, averagePowerLimit)
+				logStatus(currentTemperature, averageTemperature, currentFanSpeed, targetFanSpeed, currentPowerLimit, targetPowerLimit, averagePowerLimit)
+			} else {
+				logStatus(currentTemperature, averageTemperature, currentFanSpeed, 0, currentPowerLimit, 0, averagePowerLimit)
+			}
 		}
 	}
 }
@@ -443,7 +450,7 @@ func logStatus(currentTemperature, averageTemperature, currentFanSpeed, targetFa
 			Bool("performance", cfg.PerformanceMode).
 			Bool("auto_fan_control", autoFanControl).
 			Msg("")
-	} else if cfg.Verbose {
+	} else if cfg.Verbose || cfg.Monitor {
 		logger.Info().
 			Int("fan_speed", currentFanSpeed).
 			Int("temperature", currentTemperature).
