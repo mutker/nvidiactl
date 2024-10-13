@@ -20,7 +20,20 @@ nvidiactl is a command-line tool providing automatic fan speed management and dy
 
 ## Configuration
 
-Configuration can be done via a TOML file located at `/etc/nvidiactl.conf`, or through command-line arguments. Command-line arguments take precedence over the config file.
+Configuration can be done via a TOML file or through command-line arguments. Command-line arguments take precedence over the config file.
+
+An example configuration file is provided as `nvidiactl.example.conf`. To use it:
+
+1. Copy the example file to the correct location:
+   ```
+   sudo cp /path/to/nvidiactl.example.conf /etc/nvidiactl.conf
+   ```
+2. Edit the file to suit your needs:
+   ```
+   sudo nano /etc/nvidiactl.conf
+   ```
+
+The configuration file uses TOML format and supports the following options:
 
 ```toml
 # Time between updates (in seconds, default: 2)
