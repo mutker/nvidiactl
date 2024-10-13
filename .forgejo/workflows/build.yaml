@@ -33,7 +33,7 @@ jobs:
           go version
           go env
           go mod download
-          go build -v -o nvidiactl
+          go build -v -o nvidiactl ./cmd/nvidiactl
 
       - name: List built artifacts
         run: |

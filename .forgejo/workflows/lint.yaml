@@ -27,4 +27,4 @@ jobs:
             -v ${{ github.workspace }}:/app \
             -w /app \
             golangci/golangci-lint:latest \
-            golangci-lint run --timeout 5m --config /app/.golangci.yml
+            golangci-lint run --timeout 5m --config /app/.golangci.yml ./...
