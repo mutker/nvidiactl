@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows: ["Build"]
+    types:
+      - completed
+
+jobs:
+  release:
+    runs-on: [self-hosted, docker]
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    container:
+      image: code.forgejo.org/oci/golang:1.23-alpine3.20
+      options: --user root
+    steps:
+      - uses: https://github.com/actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install git
+        run: apk add --no-cache git
+
+        # FIXME: Replace with bumpa
+      - name: Generate changelog
+        run: |
+          git log $(git describe --tags --abbrev=0)..HEAD --pretty=format:"%h - %s" > CHANGELOG.md
+
+        # FIXME: Replace with bumpa
+      - name: Bump version and push tag
+        id: tag_version
+        uses: anothrNick/github-tag-action@1.55.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          DEFAULT_BUMP: patch
+          WITH_V: true
+
+      - name: Download artifact
+        uses: https://github.com/actions/download-artifact@v3
+        with:
+          name: nvidiactl
+          run_id: ${{ github.event.workflow_run.id }}
+
+      - name: Release
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          apk add --no-cache curl
+          curl -s https://raw.githubusercontent.com/forgejoactions/forgejo-api/main/install.sh | sh
+          forgejo release create \
+            --tag-name ${{ steps.tag_version.outputs.new_tag }} \
+            --title "Release ${{ steps.tag_version.outputs.new_tag }}" \
+            --draft=false \
+            --prerelease=false \
+            --repo ${{ github.repository }} \
+            --attach ./nvidiactl \
+            --attach ./CHANGELOG.md

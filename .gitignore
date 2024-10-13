@@ -1,4 +1,2 @@
 .zed
 .bumpa.yaml
-build/
-!build/ci
