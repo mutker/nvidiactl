@@ -273,19 +273,12 @@ func abs(x int) int {
 	return x
 }
 
-func clamp(value, min, max int) int {
-	if value < min {
-		return min
+func clamp(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
 	}
-	if value > max {
-		return max
+	if value > maxValue {
+		return maxValue
 	}
 	return value
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

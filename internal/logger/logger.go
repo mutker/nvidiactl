@@ -12,7 +12,7 @@ import (
 var log zerolog.Logger
 
 // Init initializes the logger based on the given configuration
-func Init(debug, verbose bool, isService bool) {
+func Init(debug, verbose, isService bool) {
 	var output io.Writer
 
 	if isService {
