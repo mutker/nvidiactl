@@ -1,38 +1,41 @@
 name: build
 
 on:
-  workflow_run:
-    workflows: ["lint"]
-    types:
-      - completed
+  push:
     branches:
       - main
+
+env:
+  ACTIONS_RUNNER_DEBUG: true
+  ACTIONS_STEP_DEBUG: true
 
 jobs:
   build:
     runs-on: self-hosted
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
+      - name: Set up Go
+        uses: actions/setup-go@v4
         with:
-          node-version: "16"
+          go-version: "1.23"
+
+      - name: Print Go module info
+        run: |
+          go list -m all
+          cat go.mod
 
       - name: Build binary
         run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/app \
-            -w /app \
-            golang:1.23-alpine3.20 \
-            go build -v -ldflags="-s -w" -o nvidiactl
+          go version
+          go env
+          go mod download
+          go build -v -o nvidiactl
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: nvidiactl
-          path: nvidiactl
+      - name: List built artifacts
+        run: |
+          ls -la
+          file nvidiactl || echo "nvidiactl not found"
