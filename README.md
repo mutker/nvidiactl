@@ -68,9 +68,9 @@ Enable monitoring mode (only prints statistics, with no change to fan speeds or 
 nvidiactl --monitor
 ```
 
-### Run a Systemd Service
+### Run as a Systemd Service
 
-Copy `nvidiactl.server` to `/usr/lib/systemd/system/nvidiactl.service`, then enable and start the service with `sudo systemctl enable --now nvidiactl`
+Copy `nvidiactl.service` to `/usr/lib/systemd/system/nvidiactl.service`, then enable and start the service:
 
 ```
 sudo cp nvidiactl.service /usr/lib/systemd/system/nvidiactl.service
@@ -78,22 +78,22 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now nvidiactl.service
 ```
 
-If you want to enable verbose or debug logging, add an overide with `sudo systemctl edit nvidiactl`:
+If you want to enable verbose or debug logging, add an override with `sudo systemctl edit nvidiactl`:
 
 ```
-[Unit]
+[Service]
 ExecStart=
 ExecStart=/usr/bin/nvidiactl --verbose
 ```
 
-Remember to reload systemd (`sudo systemctl daemon-reload`) and restart the service (`systemctl restart nvidiactl`).
+Remember to reload systemd (`sudo systemctl daemon-reload`) and restart the service (`sudo systemctl restart nvidiactl`).
 
 ## Building
 
-Ensure you have Go installed, and then run:
+Ensure you have Go 1.23 or later installed, and then run:
 
 ```
-go build -o build
+go build -v -o nvidiactl ./cmd/nvidiactl
 ```
 
 ## Roadmap
@@ -108,4 +108,4 @@ Contributions are welcome! Please feel free to submit a pull request or issue.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
