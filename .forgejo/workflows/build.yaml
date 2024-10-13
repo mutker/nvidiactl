@@ -1,24 +1,32 @@
-name: Build
+name: build
 
 on:
-  push:
+  workflow_run:
+    workflows: ["lint"]
+    types:
+      - completed
     branches:
       - main
 
 jobs:
   build:
-    runs-on: [self-hosted, docker]
-    container:
-      image: code.forgejo.org/oci/golang:1.23-alpine3.20
-      options: --user root
+    runs-on: self-hosted
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
-      - uses: https://github.com/actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Build
-        run: go build -v -ldflags="-s -w" -o nvidiactl
+      - name: Build binary
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/app \
+            -w /app \
+            golang:1.23-alpine3.20 \
+            go build -v -ldflags="-s -w" -o nvidiactl
 
       - name: Upload artifact
-        uses: https://github.com/actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4
         with:
           name: nvidiactl
           path: nvidiactl
