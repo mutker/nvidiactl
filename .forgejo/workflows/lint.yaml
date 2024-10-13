@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  lint:
+    name: lint
+    runs-on: [self-hosted, docker]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Print golangci-lint config
+        run: cat .golangci.yml
+
+      - name: Clear golangci-lint cache
+        run: docker run --rm -v ${{ github.workspace }}:/app -w /app golangci/golangci-lint:latest golangci-lint cache clean
+
+      - name: Run golangci-lint
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/app \
+            -w /app \
+            golangci/golangci-lint:latest \
+            golangci-lint run --timeout 5m --config /app/.golangci.yml

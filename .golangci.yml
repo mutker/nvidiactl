@@ -1,0 +1,34 @@
+linters-settings:
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - importShadow
+      - ifElseChain
+      - hugeParam
+
+linters:
+  disable-all: true
+  enable:
+    - unconvert
+    - gocritic
+    - gofumpt
+    - bidichk
+    - errcheck
+    - gofmt
+    - goimports
+    - gosimple
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - typecheck
+    - unused
+    - whitespace
+
+run:
+  timeout: 5m
