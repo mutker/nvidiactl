@@ -18,20 +18,63 @@ nvidiactl is a command-line tool providing automatic fan speed management and dy
 - 🖥️ **Standalone application** or systemd service functionality
 - 🔍 **Debug mode** for detailed logging and troubleshooting
 
+## Installation
+
+### Arch Linux (AUR)
+
+Install the `nvidiactl-git` package from the AUR using your preferred AUR helper. For example, using `yay`:
+
+   ```
+   yay -S nvidiactl-git
+   ```
+
+After installation, you can enable and start the systemd service with: `sudo systemctl enable --now nvidiactl.service`
+
+If you want to enable verbose or debug logging, add an override with `sudo systemctl edit nvidiactl`:
+
+```
+[Service]
+ExecStart=
+ExecStart=/usr/bin/nvidiactl --verbose # or --debug
+```
+
+### Building from Source
+
+1. Ensure you have Go 1.23 or later installed on your system.
+
+2. Clone the repository:
+   ```
+   git clone https://codeberg.org/mutker/nvidiactl.git
+   cd nvidiactl
+   ```
+
+3. Build the application: `go build -v -o nvidiactl ./cmd/nvidiactl`
+
+4. Copy the binary to a location in your PATH: `sudo cp nvidiactl /usr/local/bin/`
+
+5. Copy the example configuration file: `sudo cp nvidiactl.example.conf /etc/nvidiactl.conf`
+
+6. (Optional) Set up the systemd service:
+   ```
+   sudo cp nvidiactl.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now nvidiactl.service
+   ```
+
+   If you want to enable verbose or debug logging, add an override with `sudo systemctl edit nvidiactl`:
+
+  ```
+  [Service]
+  ExecStart=
+  ExecStart=/usr/bin/nvidiactl --verbose
+  ```
+  Remember to reload systemd (`sudo systemctl daemon-reload`) and restart the service (`sudo systemctl restart nvidiactl`).
+
+7. Edit the configuration file as needed: `sudo nano /etc/nvidiactl.conf`
+
 ## Configuration
 
-Configuration can be done via a TOML file or through command-line arguments. Command-line arguments take precedence over the config file.
-
-An example configuration file is provided as `nvidiactl.example.conf`. To use it:
-
-1. Copy the example file to the correct location:
-   ```
-   sudo cp /path/to/nvidiactl.example.conf /etc/nvidiactl.conf
-   ```
-2. Edit the file to suit your needs:
-   ```
-   sudo nano /etc/nvidiactl.conf
-   ```
+Configuration is be done via a TOML file at `/etc/nvidiactl.conf` or through command-line arguments. Command-line arguments take precedence over the config file.
 
 The configuration file uses TOML format and supports the following options:
 
@@ -63,43 +106,9 @@ verbose = false
 
 ## Usage
 
-Run with default configuration (or configured by `/etc/nvidiactl.conf`):
+Simply call `nvidiactl` after configuring `/etc/nvidiactl.conf`, or via the command-line, e.g. `nvidiactl --temperature=85 --fanspeed=80 --performance`
 
-```
-nvidiactl
-```
-
-Run with custom settings:
-
-```
-nvidiactl --temperature=85 --fanspeed=80 --performance
-```
-
-Enable monitoring mode (only prints statistics, with no change to fan speeds or power limits):
-
-```
-nvidiactl --monitor
-```
-
-### Run as a Systemd Service
-
-Copy `nvidiactl.service` to `/usr/lib/systemd/system/nvidiactl.service`, then enable and start the service:
-
-```
-sudo cp nvidiactl.service /usr/lib/systemd/system/nvidiactl.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now nvidiactl.service
-```
-
-If you want to enable verbose or debug logging, add an override with `sudo systemctl edit nvidiactl`:
-
-```
-[Service]
-ExecStart=
-ExecStart=/usr/bin/nvidiactl --verbose
-```
-
-Remember to reload systemd (`sudo systemctl daemon-reload`) and restart the service (`sudo systemctl restart nvidiactl`).
+Enable monitoring mode (only prints statistics, with no change to fan speeds or power limits): `nvidiactl --monitor`
 
 ## Building
 
