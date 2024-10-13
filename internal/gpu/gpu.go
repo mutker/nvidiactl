@@ -173,7 +173,7 @@ func GetFanCount() (int, error) {
 		return 0, err
 	}
 
-	return int(count), nil
+	return count, nil
 }
 
 func GetTemperature() (int, error) {
@@ -210,7 +210,7 @@ func GetMinMaxFanSpeed() (minSpeed, maxSpeed int, err error) {
 		return
 	}
 
-	minSpeed, maxSpeed = int(minSpeedUint), int(maxSpeedUint)
+	minSpeed, maxSpeed = minSpeedUint, maxSpeedUint
 	return
 }
 
