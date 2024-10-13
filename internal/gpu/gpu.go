@@ -95,7 +95,7 @@ func initFanSpeed(maxFanSpeed int) error {
 		return fmt.Errorf("failed to get min/max fan speed: %v", err)
 	}
 
-	maxFanSpeedLimit = min(maxFanSpeedLimit, maxFanSpeed)
+	maxFanSpeedLimit = minInt(maxFanSpeedLimit, maxFanSpeed)
 
 	currentFanSpeeds = make([]int, fanCount)
 	lastFanSpeeds = make([]int, fanCount)
@@ -201,16 +201,17 @@ func GetFanSpeed(fanIndex int) (int, error) {
 	return int(fanSpeed), nil
 }
 
-func GetMinMaxFanSpeed() (int, int, error) {
+func GetMinMaxFanSpeed() (minSpeed, maxSpeed int, err error) {
 	device, _ := GetHandle()
-	minSpeed, maxSpeed, ret := device.GetMinMaxFanSpeed()
+	minSpeedUint, maxSpeedUint, ret := device.GetMinMaxFanSpeed()
 	if ret != nvml.SUCCESS {
-		err := fmt.Errorf("failed to get min/max fan speed: %v", nvml.ErrorString(ret))
+		err = fmt.Errorf("failed to get min/max fan speed: %v", nvml.ErrorString(ret))
 		logger.Error().Err(err).Msg("failed to get fan speed limits")
-		return 0, 0, err
+		return
 	}
 
-	return int(minSpeed), int(maxSpeed), nil
+	minSpeed, maxSpeed = int(minSpeedUint), int(maxSpeedUint)
+	return
 }
 
 func SetFanSpeed(fanSpeed int) error {
@@ -270,23 +271,24 @@ func GetPowerLimit() (int, error) {
 	return int(powerLimit / 1000), nil // Convert milliwatts to watts
 }
 
-func GetMinMaxPowerLimits() (int, int, int, error) {
+func GetMinMaxPowerLimits() (minLimit, maxLimit, defaultLimit int, err error) {
 	device, _ := GetHandle()
-	minLimit, maxLimit, ret := device.GetPowerManagementLimitConstraints()
+	minLimitUint, maxLimitUint, ret := device.GetPowerManagementLimitConstraints()
 	if ret != nvml.SUCCESS {
-		err := fmt.Errorf("failed to get power management limit constraints: %v", nvml.ErrorString(ret))
+		err = fmt.Errorf("failed to get power management limit constraints: %v", nvml.ErrorString(ret))
 		logger.Error().Err(err).Msg("failed to get power management limit constraints")
-		return 0, 0, 0, err
+		return
 	}
 
-	defaultLimit, ret := device.GetPowerManagementDefaultLimit()
+	defaultLimitUint, ret := device.GetPowerManagementDefaultLimit()
 	if ret != nvml.SUCCESS {
-		err := fmt.Errorf("failed to get default power management limit: %v", nvml.ErrorString(ret))
+		err = fmt.Errorf("failed to get default power management limit: %v", nvml.ErrorString(ret))
 		logger.Error().Err(err).Msg("failed to get default power management limit")
-		return 0, 0, 0, err
+		return
 	}
 
-	return int(minLimit / 1000), int(maxLimit / 1000), int(defaultLimit / 1000), nil
+	minLimit, maxLimit, defaultLimit = int(minLimitUint/1000), int(maxLimitUint/1000), int(defaultLimitUint/1000)
+	return
 }
 
 func SetPowerLimit(powerLimit int) error {
@@ -381,7 +383,7 @@ func ClampPowerLimit(powerLimit int) int {
 	return powerLimit
 }
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}
