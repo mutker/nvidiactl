@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"io"
 	"os"
 	"syscall"
 	"time"
@@ -11,6 +10,7 @@ import (
 
 var log zerolog.Logger
 
+// LogLevel represents the severity of a log message
 type LogLevel int8
 
 const (
@@ -23,17 +23,16 @@ const (
 
 // Init initializes the logger based on the given configuration
 func Init(debug, verbose, isService bool) {
-	var output io.Writer
+	output := zerolog.ConsoleWriter{
+		Out:        os.Stdout,
+		TimeFormat: time.RFC3339,
+		NoColor:    true,
+	}
 
 	if isService {
-		output = zerolog.ConsoleWriter{
-			Out:        os.Stdout,
-			TimeFormat: zerolog.TimeFormatUnix,
-		}
-	} else {
-		output = zerolog.ConsoleWriter{
-			Out:        os.Stdout,
-			TimeFormat: time.RFC3339,
+		output.TimeFormat = ""
+		output.FormatTimestamp = func(i interface{}) string {
+			return ""
 		}
 	}
 
@@ -50,20 +49,7 @@ func Init(debug, verbose, isService bool) {
 
 // SetLogLevel sets the global log level
 func SetLogLevel(level LogLevel) {
-	switch level {
-	case DebugLevel:
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-	case InfoLevel:
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	case WarnLevel:
-		zerolog.SetGlobalLevel(zerolog.WarnLevel)
-	case ErrorLevel:
-		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
-	case FatalLevel:
-		zerolog.SetGlobalLevel(zerolog.FatalLevel)
-	default:
-		zerolog.SetGlobalLevel(zerolog.WarnLevel)
-	}
+	zerolog.SetGlobalLevel(zerolog.Level(level))
 }
 
 // IsService checks if the application is running as a service
@@ -77,33 +63,20 @@ func IsService() bool {
 	if os.Getppid() == 1 {
 		return true
 	}
-	if syscall.Getpgrp() == syscall.Getpid() {
-		return true
-	}
-	return false
+	return syscall.Getpgrp() == syscall.Getpid()
 }
 
 // Debug logs a debug message
-func Debug() *zerolog.Event {
-	return log.Debug()
-}
+func Debug() *zerolog.Event { return log.Debug() }
 
 // Info logs an info message
-func Info() *zerolog.Event {
-	return log.Info()
-}
+func Info() *zerolog.Event { return log.Info() }
 
 // Warn logs a warning message
-func Warn() *zerolog.Event {
-	return log.Warn()
-}
+func Warn() *zerolog.Event { return log.Warn() }
 
 // Error logs an error message
-func Error() *zerolog.Event {
-	return log.Error()
-}
+func Error() *zerolog.Event { return log.Error() }
 
 // Fatal logs a fatal message and exits the program
-func Fatal() *zerolog.Event {
-	return log.Fatal()
-}
+func Fatal() *zerolog.Event { return log.Fatal() }
