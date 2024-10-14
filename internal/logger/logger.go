@@ -11,13 +11,25 @@ import (
 
 var log zerolog.Logger
 
+type LogLevel int8
+
+const (
+	DebugLevel LogLevel = iota
+	InfoLevel
+	WarnLevel
+	ErrorLevel
+	FatalLevel
+)
+
 // Init initializes the logger based on the given configuration
 func Init(debug, verbose, isService bool) {
 	var output io.Writer
 
 	if isService {
-		zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-		output = os.Stdout
+		output = zerolog.ConsoleWriter{
+			Out:        os.Stdout,
+			TimeFormat: zerolog.TimeFormatUnix,
+		}
 	} else {
 		output = zerolog.ConsoleWriter{
 			Out:        os.Stdout,
@@ -27,11 +39,29 @@ func Init(debug, verbose, isService bool) {
 
 	log = zerolog.New(output).With().Timestamp().Logger()
 
+	SetLogLevel(WarnLevel) // Default log level
+
 	if debug {
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+		SetLogLevel(DebugLevel)
 	} else if verbose {
+		SetLogLevel(InfoLevel)
+	}
+}
+
+// SetLogLevel sets the global log level
+func SetLogLevel(level LogLevel) {
+	switch level {
+	case DebugLevel:
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	case InfoLevel:
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	} else {
+	case WarnLevel:
+		zerolog.SetGlobalLevel(zerolog.WarnLevel)
+	case ErrorLevel:
+		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+	case FatalLevel:
+		zerolog.SetGlobalLevel(zerolog.FatalLevel)
+	default:
 		zerolog.SetGlobalLevel(zerolog.WarnLevel)
 	}
 }

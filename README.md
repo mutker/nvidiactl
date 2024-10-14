@@ -52,7 +52,7 @@ ExecStart=/usr/bin/nvidiactl --verbose # or --debug
 
 4. Copy the binary to a location in your PATH: `sudo cp nvidiactl /usr/local/bin/`
 
-5. Copy the example configuration file: `sudo cp nvidiactl.example.conf /etc/nvidiactl.conf`
+5. Copy the example configuration file, and edit as needed: `sudo cp nvidiactl.example.conf /etc/nvidiactl.conf`
 
 6. (Optional) Set up the systemd service:
    ```
@@ -68,15 +68,10 @@ ExecStart=/usr/bin/nvidiactl --verbose # or --debug
   ExecStart=
   ExecStart=/usr/bin/nvidiactl --verbose
   ```
-  Remember to reload systemd (`sudo systemctl daemon-reload`) and restart the service (`sudo systemctl restart nvidiactl`).
-
-7. Edit the configuration file as needed: `sudo nano /etc/nvidiactl.conf`
 
 ## Configuration
 
-Configuration is be done via a TOML file at `/etc/nvidiactl.conf` or through command-line arguments. Command-line arguments take precedence over the config file.
-
-The configuration file uses TOML format and supports the following options:
+Configuration is done via a TOML file at `/etc/nvidiactl.conf` or through command-line arguments. Command-line arguments take precedence over the config file.
 
 ```toml
 # Time between updates (in seconds, default: 2)

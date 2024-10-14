@@ -10,7 +10,11 @@ env:
   ACTIONS_STEP_DEBUG: true
 
 jobs:
+  lint:
+    uses: ./.forgejo/workflows/lint.yaml
+
   build:
+    needs: lint
     runs-on: self-hosted
     steps:
       - name: Checkout code
@@ -37,5 +41,4 @@ jobs:
 
       - name: List built artifacts
         run: |
-          ls -la
           file nvidiactl || echo "nvidiactl not found"

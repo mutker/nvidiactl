@@ -132,14 +132,14 @@ func Shutdown() {
 	if initialized {
 		ret := nvml.Shutdown()
 		if ret != nvml.SUCCESS {
-			logger.Error().Msgf("Failed to shutdown NVML: %v", nvml.ErrorString(ret))
+			logger.Error().Msgf("failed to shutdown NVML: %v", nvml.ErrorString(ret))
 		}
 	}
 }
 
 func GetHandle() (nvml.Device, error) {
 	if !initialized {
-		return nil, errors.New("GPU not initialized")
+		return nil, errors.New("failed to initialize GPU")
 	}
 	return cacheGPU, nil
 }
@@ -228,7 +228,7 @@ func SetFanSpeed(fanSpeed int) error {
 		lastFanSpeeds[i] = currentFanSpeeds[i]
 		currentFanSpeeds[i] = fanSpeed
 	}
-	logger.Debug().Msgf("Set all fans speed to %d%%", fanSpeed)
+	logger.Debug().Msgf("Set fan speed: %d%%", fanSpeed)
 	return nil
 }
 
@@ -251,7 +251,7 @@ func EnableAutoFanControl() error {
 			return err
 		}
 	}
-	logger.Debug().Msg("Enabled auto fan control for all fans")
+	logger.Debug().Msg("Auto fan control: enabled")
 	return nil
 }
 
@@ -299,7 +299,7 @@ func SetPowerLimit(powerLimit int) error {
 		logger.Error().Err(err).Msg("failed to set power limit")
 		return err
 	}
-	logger.Debug().Msgf("Set power limit to %dW", powerLimit)
+	logger.Debug().Msgf("Set power limit: %dW", powerLimit)
 	lastPowerLimit = currentPowerLimit
 	currentPowerLimit = powerLimit
 	return nil
