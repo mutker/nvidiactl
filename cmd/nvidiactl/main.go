@@ -34,7 +34,7 @@ func init() {
 		os.Exit(1)
 	}
 
-	logger.Init(cfg.Debug, cfg.Verbose)
+	logger.Init(cfg.Debug, cfg.Verbose, logger.IsService())
 	logger.Debug().Msg("Config loaded")
 
 	if err := gpu.Initialize(); err != nil {

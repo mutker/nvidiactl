@@ -3,15 +3,15 @@ package logger
 import (
 	"io"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/journald"
 )
 
-type LogLevel int8
-
 var log zerolog.Logger
+
+type LogLevel int8
 
 const (
 	DebugLevel LogLevel = iota
@@ -21,11 +21,15 @@ const (
 	FatalLevel
 )
 
-func Init(debug, verbose bool) {
+// Init initializes the logger based on the given configuration
+func Init(debug, verbose, isService bool) {
 	var output io.Writer
 
-	if IsService() {
-		output = journald.NewJournalDWriter()
+	if isService {
+		output = zerolog.ConsoleWriter{
+			Out:        os.Stdout,
+			TimeFormat: zerolog.TimeFormatUnix,
+		}
 	} else {
 		output = zerolog.ConsoleWriter{
 			Out:        os.Stdout,
@@ -33,21 +37,15 @@ func Init(debug, verbose bool) {
 		}
 	}
 
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	log = zerolog.New(output).With().Timestamp().Logger()
 
-	var level zerolog.Level
+	SetLogLevel(WarnLevel) // Default log level
+
 	if debug {
-		level = zerolog.DebugLevel
+		SetLogLevel(DebugLevel)
 	} else if verbose {
-		level = zerolog.InfoLevel
-	} else {
-		level = zerolog.WarnLevel
+		SetLogLevel(InfoLevel)
 	}
-
-	log = zerolog.New(output).With().Timestamp().Logger().Level(level)
-
-	// Add a test log message
-	log.Info().Msg("Logger initialized")
 }
 
 // SetLogLevel sets the global log level
@@ -70,7 +68,19 @@ func SetLogLevel(level LogLevel) {
 
 // IsService checks if the application is running as a service
 func IsService() bool {
-	return os.Getenv("JOURNAL_STREAM") != ""
+	if _, err := os.Stdin.Stat(); err != nil {
+		return true
+	}
+	if os.Getenv("SERVICE_NAME") != "" || os.Getenv("INVOCATION_ID") != "" {
+		return true
+	}
+	if os.Getppid() == 1 {
+		return true
+	}
+	if syscall.Getpgrp() == syscall.Getpid() {
+		return true
+	}
+	return false
 }
 
 // Debug logs a debug message
