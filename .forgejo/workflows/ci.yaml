@@ -1,31 +1,39 @@
-name: build
+name: ci
 
 on:
+  pull_request:
   push:
     branches:
       - main
 
-env:
-  ACTIONS_RUNNER_DEBUG: true
-  ACTIONS_STEP_DEBUG: true
-
 jobs:
   lint:
-    uses: ./.forgejo/workflows/lint.yaml
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Print golangci-lint config
+        run: cat .golangci.yml
+
+      - name: Run golangci-lint
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/app \
+            -w /app \
+            golangci/golangci-lint:latest \
+            golangci-lint run --timeout 5m --config /app/.golangci.yml ./...
 
   build:
-    needs: lint
+    needs: [lint]
     runs-on: self-hosted
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: ">=1.23"
 
       - name: Print Go module info
         run: |
@@ -37,6 +45,7 @@ jobs:
           go version
           go env
           go mod download
+          go mod tidy
           go build -v -o nvidiactl ./cmd/nvidiactl
 
       - name: List built artifacts

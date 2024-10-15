@@ -72,11 +72,12 @@ func Load() (*Config, error) {
 	}
 
 	// Set log level based on config
-	if cfg.Debug {
+	switch {
+	case cfg.Debug:
 		logger.SetLogLevel(logger.DebugLevel)
-	} else if cfg.Verbose {
+	case cfg.Verbose:
 		logger.SetLogLevel(logger.InfoLevel)
-	} else {
+	default:
 		logger.SetLogLevel(logger.WarnLevel)
 	}
 

@@ -1,16 +1,3 @@
-linters-settings:
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-    disabled-checks:
-      - importShadow
-      - ifElseChain
-      - hugeParam
-
 linters:
   disable-all: true
   enable:
