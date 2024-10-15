@@ -63,6 +63,7 @@ func IsService() bool {
 	if os.Getppid() == 1 {
 		return true
 	}
+
 	return syscall.Getpgrp() == syscall.Getpid()
 }
 

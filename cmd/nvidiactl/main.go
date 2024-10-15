@@ -131,6 +131,7 @@ func getGPUStats() error {
 
 	getTelemetry(currentTemperature, avgTemp, currentFanSpeeds[0], targetFanSpeed,
 		currentPowerLimit, targetPowerLimit, avgPowerLimit)
+
 	return nil
 }
 
@@ -268,6 +269,7 @@ func calculateFanSpeedPercentage(tempPercentage float64) float64 {
 	if cfg.Performance {
 		return math.Pow(tempPercentage, performancePowFactor)
 	}
+
 	return math.Pow(tempPercentage, normalPowFactor)
 }
 
@@ -279,11 +281,13 @@ func calculatePowerLimit(
 	tempDiff := currentTemperature - targetTemperature
 	if tempDiff > 0 && currentFanSpeed >= maxFanSpeed {
 		adjustment := min(tempDiff*wattsPerDegree, maxPowerLimitChange)
+
 		return clamp(currentPowerLimit-adjustment, minPowerLimit, maxPowerLimit)
 	}
 
 	if tempDiff < 0 {
 		adjustment := min(-tempDiff*wattsPerDegree, maxPowerLimitChange)
+
 		return clamp(currentPowerLimit+adjustment, minPowerLimit, maxPowerLimit)
 	}
 
@@ -299,6 +303,7 @@ func abs(x int) int {
 	if x < 0 {
 		return -x
 	}
+
 	return x
 }
 
@@ -306,8 +311,10 @@ func clamp(value, minValue, maxValue int) int {
 	if value < minValue {
 		return minValue
 	}
+
 	if value > maxValue {
 		return maxValue
 	}
+
 	return value
 }

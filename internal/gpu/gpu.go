@@ -98,7 +98,7 @@ func initFanSpeed(maxFanSpeed int) error {
 		return fmt.Errorf("failed to get min/max fan speed: %v", err)
 	}
 
-	maxFanSpeedLimit = minInt(maxFanSpeedLimit, maxFanSpeed)
+	maxFanSpeedLimit = min(maxFanSpeedLimit, maxFanSpeed)
 
 	currentFanSpeeds = make([]int, fanCount)
 	lastFanSpeeds = make([]int, fanCount)
@@ -112,6 +112,7 @@ func initFanSpeed(maxFanSpeed int) error {
 	}
 
 	logger.Info().Msgf("Initial fan speeds detected: %v", currentFanSpeeds)
+
 	return nil
 }
 
@@ -128,6 +129,7 @@ func initPowerLimits() error {
 	}
 
 	logger.Debug().Msgf("Initial power limit: %dW", currentPowerLimit)
+
 	return SetPowerLimit(defaultPowerLimit)
 }
 
@@ -144,6 +146,7 @@ func GetHandle() (nvml.Device, error) {
 	if !initialized {
 		return nil, errors.New("failed to initialize GPU")
 	}
+
 	return cacheGPU, nil
 }
 
@@ -157,6 +160,7 @@ func GetName() (string, error) {
 	if ret != nvml.SUCCESS {
 		err := errors.New(nvml.ErrorString(ret))
 		logger.Error().Err(err).Msg("failed to get GPU name")
+
 		return "", err
 	}
 
@@ -173,6 +177,7 @@ func GetFanCount() (int, error) {
 	if ret != nvml.SUCCESS {
 		err := fmt.Errorf("failed to get number of fans: %v", nvml.ErrorString(ret))
 		logger.Error().Err(err).Msg("failed to get GPU fan count")
+
 		return 0, err
 	}
 
@@ -185,8 +190,10 @@ func GetTemperature() (int, error) {
 	if ret != nvml.SUCCESS {
 		err := errors.New(nvml.ErrorString(ret))
 		logger.Error().Err(err).Msg("failed to get GPU temperature")
+
 		return 0, err
 	}
+
 	return int(temp), nil
 }
 
@@ -210,6 +217,7 @@ func GetMinMaxFanSpeed() (minSpeed, maxSpeed int, err error) {
 	if ret != nvml.SUCCESS {
 		err = fmt.Errorf("failed to get min/max fan speed: %v", nvml.ErrorString(ret))
 		logger.Error().Err(err).Msg("failed to get fan speed limits")
+
 		return
 	}
 
@@ -233,6 +241,7 @@ func SetFanSpeed(fanSpeed int) error {
 		currentFanSpeeds[i] = fanSpeed
 	}
 	logger.Debug().Msgf("Set fan speed: %d%%", fanSpeed)
+
 	return nil
 }
 
@@ -252,10 +261,12 @@ func EnableAutoFanControl() error {
 		if ret != nvml.SUCCESS {
 			err := fmt.Errorf("failed to set default fan speed for fan %d: %v", i, nvml.ErrorString(ret))
 			logger.Error().Err(err).Msg("failed to set default fan speed")
+
 			return err
 		}
 	}
 	logger.Debug().Msg("Auto fan control: enabled")
+
 	return nil
 }
 
@@ -269,6 +280,7 @@ func GetPowerLimit() (int, error) {
 	if ret != nvml.SUCCESS {
 		err := fmt.Errorf("failed to get current power limit: %v", nvml.ErrorString(ret))
 		logger.Error().Err(err).Msg("failed to get current power limit")
+
 		return 0, err
 	}
 
@@ -281,6 +293,7 @@ func GetMinMaxPowerLimits() (minLimit, maxLimit, defLimit int, err error) {
 	if ret != nvml.SUCCESS {
 		err = fmt.Errorf("failed to get power management limit constraints: %v", nvml.ErrorString(ret))
 		logger.Error().Err(err).Msg("failed to get power management limit constraints")
+
 		return
 	}
 
@@ -288,12 +301,14 @@ func GetMinMaxPowerLimits() (minLimit, maxLimit, defLimit int, err error) {
 	if ret != nvml.SUCCESS {
 		err = fmt.Errorf("failed to get default power management limit: %v", nvml.ErrorString(ret))
 		logger.Error().Err(err).Msg("failed to get default power management limit")
+
 		return
 	}
 
 	minLimit = int(_minLimit / milliWattsToWatts)
 	maxLimit = int(_maxLimit / milliWattsToWatts)
 	defLimit = int(_defLimit / milliWattsToWatts)
+
 	return
 }
 
@@ -303,11 +318,13 @@ func SetPowerLimit(powerLimit int) error {
 	if ret != nvml.SUCCESS {
 		err := fmt.Errorf("failed to set power limit: %v", nvml.ErrorString(ret))
 		logger.Error().Err(err).Msg("failed to set power limit")
+
 		return err
 	}
 	logger.Debug().Msgf("Set power limit: %dW", powerLimit)
 	lastPowerLimit = currentPowerLimit
 	currentPowerLimit = powerLimit
+
 	return nil
 }
 
@@ -321,6 +338,7 @@ func UpdateTemperatureHistory(currentTemperature int) int {
 	for _, temp := range temperatureHistory {
 		sum += temp
 	}
+
 	return sum / len(temperatureHistory)
 }
 
@@ -334,6 +352,7 @@ func UpdatePowerLimitHistory(newPowerLimit int) int {
 	for _, limit := range powerLimitHistory {
 		sum += limit
 	}
+
 	return sum / len(powerLimitHistory)
 }
 
@@ -376,6 +395,7 @@ func ClampFanSpeed(fanSpeed int) int {
 	if fanSpeed > maxFanSpeedLimit {
 		return maxFanSpeedLimit
 	}
+
 	return fanSpeed
 }
 
@@ -386,12 +406,6 @@ func ClampPowerLimit(powerLimit int) int {
 	if powerLimit > maxPowerLimit {
 		return maxPowerLimit
 	}
-	return powerLimit
-}
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	return powerLimit
 }

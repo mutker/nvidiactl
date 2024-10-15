@@ -7,8 +7,10 @@ linters:
     - execinquery
     - exhaustruct
     - exportloopref
+    - godot
     - gomnd
     - varnamelen
+    - wsl
 
 linters-settings:
   mnd:
@@ -18,6 +20,8 @@ linters-settings:
     # Minimal complexity of if statements to report.
     # Default: 5
     min-complexity: 10
+  nlreturn:
+    block-size: 2
   paralleltest:
     # Ignore missing calls to `t.Parallel()` and only report incorrect uses of it.
     # Default: false
