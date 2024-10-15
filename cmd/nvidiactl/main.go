@@ -45,7 +45,7 @@ func init() {
 func main() {
 	defer gpu.Shutdown()
 
-	if err := gpu.InitializeSettings(cfg.MaxFanSpeed, cfg.Temperature); err != nil {
+	if err := gpu.InitializeSettings(cfg.FanSpeed, cfg.Temperature); err != nil {
 		logger.Fatal().Err(err).Msg("failed to initialize GPU settings")
 	}
 
@@ -131,8 +131,8 @@ func getGPUStats() error {
 }
 
 func setGPUParameters(avgTemp, currentFanSpeed, currentPowerLimit int) (targetFanSpeed, targetPowerLimit int, err error) {
-	targetFanSpeed = calculateFanSpeed(avgTemp, cfg.MaxTemperature, cfg.MaxFanSpeed)
-	targetPowerLimit = calculatePowerLimit(avgTemp, cfg.MaxTemperature, currentFanSpeed, cfg.MaxFanSpeed, currentPowerLimit)
+	targetFanSpeed = calculateFanSpeed(avgTemp, cfg.Temperature, cfg.FanSpeed)
+	targetPowerLimit = calculatePowerLimit(avgTemp, cfg.Temperature, currentFanSpeed, cfg.FanSpeed, currentPowerLimit)
 
 	if avgTemp <= minTemperature {
 		if !autoFanControl {
@@ -155,7 +155,7 @@ func setGPUParameters(avgTemp, currentFanSpeed, currentPowerLimit int) (targetFa
 		}
 	}
 
-	if !cfg.PerformanceMode {
+	if !cfg.Performance {
 		if !applyHysteresis(targetPowerLimit, currentPowerLimit, 5) {
 			if err := gpu.SetPowerLimit(targetPowerLimit); err != nil {
 				return 0, 0, err
@@ -200,11 +200,11 @@ func getTelemetry(currentTemperature, averageTemperature, currentFanSpeed, targe
 			Int("current_fan_speed", currentFanSpeed).
 			Int("target_fan_speed", targetFanSpeed).
 			Interface("last_set_fan_speeds", lastFanSpeeds).
-			Int("max_fan_speed", cfg.MaxFanSpeed).
+			Int("max_fan_speed", cfg.FanSpeed).
 			Int("current_temperature", currentTemperature).
 			Int("average_temperature", averageTemperature).
 			Int("min_temperature", minTemperature).
-			Int("max_temperature", cfg.MaxTemperature).
+			Int("max_temperature", cfg.Temperature).
 			Int("current_power_limit", currentPowerLimit).
 			Int("target_power_limit", targetPowerLimit).
 			Int("average_power_limit", averagePowerLimit).
@@ -214,7 +214,7 @@ func getTelemetry(currentTemperature, averageTemperature, currentFanSpeed, targe
 			Int("max_fan_speed", maxFanSpeedLimit).
 			Int("hysteresis", cfg.Hysteresis).
 			Bool("monitor", cfg.Monitor).
-			Bool("performance", cfg.PerformanceMode).
+			Bool("performance", cfg.Performance).
 			Bool("auto_fan_control", autoFanControl).
 			Msg("")
 	} else if cfg.Verbose || cfg.Monitor {
@@ -255,7 +255,7 @@ func calculateFanSpeed(averageTemperature, maxTemperature, configMaxFanSpeed int
 }
 
 func calculateFanSpeedPercentage(tempPercentage float64) float64 {
-	if cfg.PerformanceMode {
+	if cfg.Performance {
 		return math.Pow(tempPercentage, 1.5)
 	}
 	return math.Pow(tempPercentage, 2)
