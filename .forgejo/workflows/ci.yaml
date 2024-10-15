@@ -12,6 +12,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ">=1.23"
+
+      - name: Tidy Go mods
+        run: go mod tidy
+
       - name: Print golangci-lint config
         run: cat .golangci.yml
 
@@ -30,24 +38,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ">=1.23"
-
-      - name: Print Go module info
+      - name: Print Go info
         run: |
+          go version
+          go env
           go list -m all
           cat go.mod
 
       - name: Build binary
         run: |
-          go version
-          go env
-          go mod download
-          go mod tidy
           go build -v -o nvidiactl ./cmd/nvidiactl
 
-      - name: List built artifacts
+      - name: Show artifact
         run: |
           file nvidiactl || echo "nvidiactl not found"
