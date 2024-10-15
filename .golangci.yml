@@ -7,10 +7,12 @@ linters:
     - execinquery
     - exhaustruct
     - exportloopref
+    - gochecknoglobals
     - godot
     - gomnd
     - varnamelen
     - wsl
+    - zerologlint
 
 linters-settings:
   mnd:

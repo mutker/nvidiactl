@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 
 	"codeberg.org/mutker/nvidiactl/internal/logger"
@@ -18,6 +19,8 @@ type Config struct {
 	Debug       bool
 	Verbose     bool
 }
+
+var ErrInvalidInterval = errors.New("invalid interval")
 
 func Load() (*Config, error) {
 	v := viper.New()
@@ -78,6 +81,11 @@ func Load() (*Config, error) {
 		Monitor:     v.GetBool("monitor"),
 		Debug:       v.GetBool("debug"),
 		Verbose:     v.GetBool("verbose"),
+	}
+
+	// Validate interval
+	if cfg.Interval <= 0 {
+		return nil, fmt.Errorf("%w: %d", ErrInvalidInterval, cfg.Interval)
 	}
 
 	// Set log level based on config

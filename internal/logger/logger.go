@@ -20,6 +20,18 @@ const (
 	FatalLevel
 )
 
+type LogEvent struct {
+	*zerolog.Event
+}
+
+func (e *LogEvent) Msg(msg string) {
+	e.Event.Msg(msg)
+}
+
+func (e *LogEvent) Send() {
+	e.Event.Send()
+}
+
 // Init initializes the logger based on the given configuration
 func Init(debug, verbose, isService bool) {
 	output := zerolog.ConsoleWriter{
@@ -29,7 +41,7 @@ func Init(debug, verbose, isService bool) {
 
 	if isService {
 		output.TimeFormat = ""
-		output.FormatTimestamp = func(i interface{}) string {
+		output.FormatTimestamp = func(_ interface{}) string {
 			return ""
 		}
 	}
@@ -66,16 +78,26 @@ func IsService() bool {
 }
 
 // Debug logs a debug message
-func Debug() *zerolog.Event { return log.Debug() }
+func Debug() *LogEvent {
+	return &LogEvent{log.Debug()}
+}
 
 // Info logs an info message
-func Info() *zerolog.Event { return log.Info() }
+func Info() *LogEvent {
+	return &LogEvent{log.Info()}
+}
 
 // Warn logs a warning message
-func Warn() *zerolog.Event { return log.Warn() }
+func Warn() *LogEvent {
+	return &LogEvent{log.Warn()}
+}
 
 // Error logs an error message
-func Error() *zerolog.Event { return log.Error() }
+func Error() *LogEvent {
+	return &LogEvent{log.Error()}
+}
 
 // Fatal logs a fatal message and exits the program
-func Fatal() *zerolog.Event { return log.Fatal() }
+func Fatal() *LogEvent {
+	return &LogEvent{log.Fatal()}
+}

@@ -10,18 +10,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var configExample = []byte(`
-interval = 5
-temperature = 75
-fanspeed = 80
-hysteresis = 3
-performance = true
-monitor = false
-debug = true
-verbose = false
-`)
-
 func TestLoad(t *testing.T) {
+	configExample := []byte(`
+    interval = 5
+    temperature = 75
+    fanspeed = 80
+    hysteresis = 3
+    performance = true
+    monitor = false
+    debug = true
+    verbose = false
+    `)
+
 	// Create a new Viper instance
 	v := viper.New()
 	v.SetConfigType("toml")
