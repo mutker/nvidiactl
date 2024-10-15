@@ -12,6 +12,7 @@ import (
 const (
 	temperatureWindowSize = 5
 	powerLimitWindowSize  = 5
+	milliWattsToWatts     = 1000
 )
 
 var (
@@ -39,6 +40,7 @@ func Initialize() error {
 		ret := nvml.Init()
 		if ret != nvml.SUCCESS {
 			initErr = fmt.Errorf("failed to initialize NVML: %v", nvml.ErrorString(ret))
+
 			return
 		}
 
@@ -46,6 +48,7 @@ func Initialize() error {
 		device, ret = nvml.DeviceGetHandleByIndex(0)
 		if ret != nvml.SUCCESS {
 			initErr = fmt.Errorf("failed to get device handle: %v", nvml.ErrorString(ret))
+
 			return
 		}
 		cacheGPU = device
@@ -211,6 +214,7 @@ func GetMinMaxFanSpeed() (minSpeed, maxSpeed int, err error) {
 	}
 
 	minSpeed, maxSpeed = minSpeedUint, maxSpeedUint
+
 	return
 }
 
@@ -268,32 +272,34 @@ func GetPowerLimit() (int, error) {
 		return 0, err
 	}
 
-	return int(powerLimit / 1000), nil // Convert milliwatts to watts
+	return int(powerLimit / milliWattsToWatts), nil // Convert milliwatts to watts
 }
 
-func GetMinMaxPowerLimits() (minLimit, maxLimit, defaultLimit int, err error) {
+func GetMinMaxPowerLimits() (minLimit, maxLimit, defLimit int, err error) {
 	device, _ := GetHandle()
-	minLimitUint, maxLimitUint, ret := device.GetPowerManagementLimitConstraints()
+	_minLimit, _maxLimit, ret := device.GetPowerManagementLimitConstraints()
 	if ret != nvml.SUCCESS {
 		err = fmt.Errorf("failed to get power management limit constraints: %v", nvml.ErrorString(ret))
 		logger.Error().Err(err).Msg("failed to get power management limit constraints")
 		return
 	}
 
-	defaultLimitUint, ret := device.GetPowerManagementDefaultLimit()
+	_defLimit, ret := device.GetPowerManagementDefaultLimit()
 	if ret != nvml.SUCCESS {
 		err = fmt.Errorf("failed to get default power management limit: %v", nvml.ErrorString(ret))
 		logger.Error().Err(err).Msg("failed to get default power management limit")
 		return
 	}
 
-	minLimit, maxLimit, defaultLimit = int(minLimitUint/1000), int(maxLimitUint/1000), int(defaultLimitUint/1000)
+	minLimit = int(_minLimit / milliWattsToWatts)
+	maxLimit = int(_maxLimit / milliWattsToWatts)
+	defLimit = int(_defLimit / milliWattsToWatts)
 	return
 }
 
 func SetPowerLimit(powerLimit int) error {
 	device, _ := GetHandle()
-	ret := device.SetPowerManagementLimit(uint32(powerLimit * 1000)) // Convert watts to milliwatts
+	ret := device.SetPowerManagementLimit(uint32(powerLimit * milliWattsToWatts)) // Convert watts to milliwatts
 	if ret != nvml.SUCCESS {
 		err := fmt.Errorf("failed to set power limit: %v", nvml.ErrorString(ret))
 		logger.Error().Err(err).Msg("failed to set power limit")

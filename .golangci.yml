@@ -1,21 +1,31 @@
 linters:
-  disable-all: true
-  enable:
-    - unconvert
-    - gocritic
-    - gofumpt
-    - bidichk
-    - errcheck
-    - gofmt
-    - goimports
-    - gosimple
-    - govet
-    - ineffassign
-    - misspell
-    - staticcheck
-    - typecheck
-    - unused
-    - whitespace
+  enable-all: true
+  disable:
+    - copyloopvar
+    - intrange
+    - depguard
+    - execinquery
+    - exhaustruct
+    - exportloopref
+    - gomnd
+    - varnamelen
+
+linters-settings:
+  mnd:
+    ignored-functions:
+      - '^v\.SetDefault'
+  nestif:
+    # Minimal complexity of if statements to report.
+    # Default: 5
+    min-complexity: 10
+  paralleltest:
+    # Ignore missing calls to `t.Parallel()` and only report incorrect uses of it.
+    # Default: false
+    ignore-missing: true
+    # Ignore missing calls to `t.Parallel()` in subtests. Top-level tests are
+    # still required to have `t.Parallel`, but subtests are allowed to skip it.
+    # Default: false
+    ignore-missing-subtests: true
 
 run:
   timeout: 5m

@@ -1,9 +1,10 @@
-package config
+package config_test
 
 import (
 	"bytes"
 	"testing"
 
+	"codeberg.org/mutker/nvidiactl/internal/config"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,8 +30,10 @@ func TestLoad(t *testing.T) {
 	err := v.ReadConfig(bytes.NewBuffer(configExample))
 	require.NoError(t, err, "Failed to read config")
 
+	// Create a new config struct
+	var cfg config.Config
+
 	// Unmarshal the config
-	var cfg Config
 	err = v.Unmarshal(&cfg)
 	require.NoError(t, err, "Failed to unmarshal config")
 
@@ -53,7 +56,7 @@ func TestLoad(t *testing.T) {
 }
 
 func TestLoadDefaults(t *testing.T) {
-	cfg, err := Load()
+	cfg, err := config.Load()
 	require.NoError(t, err, "Failed to load config")
 
 	// Assert default values
