@@ -21,7 +21,7 @@ linters-settings:
     # Default: 5
     min-complexity: 10
   nlreturn:
-    block-size: 2
+    block-size: 3
   paralleltest:
     # Ignore missing calls to `t.Parallel()` and only report incorrect uses of it.
     # Default: false

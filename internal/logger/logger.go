@@ -10,7 +10,6 @@ import (
 
 var log zerolog.Logger
 
-// LogLevel represents the severity of a log message
 type LogLevel int8
 
 const (
@@ -26,7 +25,6 @@ func Init(debug, verbose, isService bool) {
 	output := zerolog.ConsoleWriter{
 		Out:        os.Stdout,
 		TimeFormat: time.RFC3339,
-		NoColor:    true,
 	}
 
 	if isService {
