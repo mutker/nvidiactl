@@ -5,6 +5,7 @@ import (
 	"syscall"
 	"time"
 
+	"codeberg.org/mutker/nvidiactl/internal/errors"
 	"github.com/rs/zerolog"
 )
 
@@ -97,7 +98,23 @@ func Error() *LogEvent {
 	return &LogEvent{log.Error()}
 }
 
+// ErrorWithCode logs an error message with a specific error code
+func ErrorWithCode(err *errors.AppError) *LogEvent {
+	return &LogEvent{log.Error().
+		Str("error_code", string(err.Code)).
+		Str("error_message", err.Error()).
+		AnErr("error", err.Err)}
+}
+
 // Fatal logs a fatal message and exits the program
 func Fatal() *LogEvent {
 	return &LogEvent{log.Fatal()}
+}
+
+// FatalWithCode logs a fatal message with a specific error code and exits the program
+func FatalWithCode(err *errors.AppError) *LogEvent {
+	return &LogEvent{log.Fatal().
+		Str("error_code", string(err.Code)).
+		Str("error_message", err.Error()).
+		AnErr("error", err.Err)}
 }

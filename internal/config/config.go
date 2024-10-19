@@ -1,9 +1,9 @@
 package config
 
 import (
-	"errors"
-	"fmt"
+	Errors "errors"
 
+	"codeberg.org/mutker/nvidiactl/internal/errors"
 	"codeberg.org/mutker/nvidiactl/internal/logger"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -20,12 +20,33 @@ type Config struct {
 	Verbose     bool
 }
 
-var ErrInvalidInterval = errors.New("invalid interval")
-
 func Load() (*Config, error) {
 	v := viper.New()
+	setDefaults(v)
+	defineFlags(v)
 
-	// Set defaults
+	if err := bindFlags(v); err != nil {
+		return nil, err
+	}
+
+	if err := loadConfigFile(v); err != nil {
+		return nil, err
+	}
+
+	bindEnvVariables(v)
+
+	cfg := createConfig(v)
+
+	if err := validateConfig(cfg); err != nil {
+		return nil, err
+	}
+
+	setLogLevel(cfg)
+
+	return cfg, nil
+}
+
+func setDefaults(v *viper.Viper) {
 	v.SetDefault("interval", 2)
 	v.SetDefault("temperature", 80)
 	v.SetDefault("fanspeed", 100)
@@ -34,8 +55,9 @@ func Load() (*Config, error) {
 	v.SetDefault("monitor", false)
 	v.SetDefault("debug", false)
 	v.SetDefault("verbose", false)
+}
 
-	// Define flags
+func defineFlags(v *viper.Viper) {
 	pflag.Bool("debug", v.GetBool("debug"), "Enable debugging mode")
 	pflag.Bool("verbose", v.GetBool("verbose"), "Enable verbose logging")
 	pflag.Int("interval", v.GetInt("interval"), "Interval between updates (in seconds)")
@@ -44,35 +66,43 @@ func Load() (*Config, error) {
 	pflag.Int("hysteresis", v.GetInt("hysteresis"), "Temperature change required before adjusting fan speed")
 	pflag.Bool("performance", v.GetBool("performance"), "Enable performance mode (disable power limit adjustments)")
 	pflag.Bool("monitor", v.GetBool("monitor"), "Enable monitor mode (only log, don't change settings)")
-
-	// Parse flags
 	pflag.Parse()
+}
 
-	// Bind flags to viper
+func bindFlags(v *viper.Viper) error {
 	if err := v.BindPFlags(pflag.CommandLine); err != nil {
-		return nil, fmt.Errorf("failed to bind flags: %w", err)
+		return errors.Wrap(errors.ErrBindFlags, err)
 	}
 
-	// Load configuration from file
+	return nil
+}
+
+func loadConfigFile(v *viper.Viper) error {
 	v.SetConfigName("nvidiactl")
 	v.SetConfigType("toml")
 	v.AddConfigPath("/etc")
 	v.AddConfigPath(".")
 
 	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+		var configFileNotFoundErr viper.ConfigFileNotFoundError
+		if Errors.As(err, &configFileNotFoundErr) {
 			logger.Info().Msg("No config file found. Using defaults and flags.")
-		} else {
-			return nil, fmt.Errorf("failed to read config file: %w", err)
+			return nil
 		}
+
+		return errors.Wrap(errors.ErrReadConfig, err)
 	}
 
-	// Bind environment variables
+	return nil
+}
+
+func bindEnvVariables(v *viper.Viper) {
 	v.SetEnvPrefix("NVIDIACTL")
 	v.AutomaticEnv()
+}
 
-	// Create and populate the Config struct
-	cfg := &Config{
+func createConfig(v *viper.Viper) *Config {
+	return &Config{
 		Interval:    v.GetInt("interval"),
 		Temperature: v.GetInt("temperature"),
 		FanSpeed:    v.GetInt("fanspeed"),
@@ -82,13 +112,17 @@ func Load() (*Config, error) {
 		Debug:       v.GetBool("debug"),
 		Verbose:     v.GetBool("verbose"),
 	}
+}
 
-	// Validate interval
+func validateConfig(cfg *Config) error {
 	if cfg.Interval <= 0 {
-		return nil, fmt.Errorf("%w: %d", ErrInvalidInterval, cfg.Interval)
+		return errors.WithData(errors.ErrInvalidInterval, cfg.Interval)
 	}
 
-	// Set log level based on config
+	return nil
+}
+
+func setLogLevel(cfg *Config) {
 	switch {
 	case cfg.Debug:
 		logger.SetLogLevel(logger.DebugLevel)
@@ -97,6 +131,4 @@ func Load() (*Config, error) {
 	default:
 		logger.SetLogLevel(logger.WarnLevel)
 	}
-
-	return cfg, nil
 }
