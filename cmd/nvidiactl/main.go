@@ -128,6 +128,11 @@ func (a *AppState) loop(ctx context.Context) error {
 				if err != nil {
 					return err
 				}
+			} else {
+				// In monitor mode, calculate target values without applying them
+				state.TargetFanSpeed = a.calculateFanSpeed(state.AverageTemperature, a.cfg.Temperature, a.cfg.FanSpeed)
+				state.TargetPowerLimit = a.calculatePowerLimit(state.CurrentTemperature, a.cfg.Temperature,
+					state.CurrentFanSpeed, a.cfg.FanSpeed, state.CurrentPowerLimit)
 			}
 
 			a.logGPUState(state)
@@ -260,7 +265,7 @@ func (a *AppState) logGPUState(state GPUState) {
 			Bool("performance", a.cfg.Performance).
 			Bool("auto_fan_control", a.autoFanControl).
 			Msg("")
-	} else if a.cfg.Verbose || a.cfg.Monitor {
+	} else if a.cfg.Verbose {
 		logger.Info().
 			Int("fan_speed", state.CurrentFanSpeed).
 			Int("target_fan_speed", state.TargetFanSpeed).

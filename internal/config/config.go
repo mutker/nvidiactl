@@ -16,8 +16,8 @@ type Config struct {
 	Hysteresis  int
 	Performance bool
 	Monitor     bool
-	Debug       bool
 	Verbose     bool
+	Debug       bool
 }
 
 func Load() (*Config, error) {
@@ -36,6 +36,11 @@ func Load() (*Config, error) {
 	bindEnvVariables(v)
 
 	cfg := createConfig(v)
+
+	// If Monitor is true, set Verbose to true unless Debug is already true
+	if cfg.Monitor && !cfg.Debug {
+		cfg.Verbose = true
+	}
 
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
