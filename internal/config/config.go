@@ -1,8 +1,6 @@
 package config
 
 import (
-	Errors "errors"
-
 	"codeberg.org/mutker/nvidiactl/internal/errors"
 	"codeberg.org/mutker/nvidiactl/internal/logger"
 	"github.com/spf13/pflag"
@@ -39,7 +37,6 @@ func Load() (*Config, error) {
 
 	cfg := createConfig(v)
 
-	// If Monitor is true, set Verbose to true unless Debug is already true
 	if cfg.Monitor && !cfg.Debug {
 		cfg.Verbose = true
 	}
@@ -91,18 +88,22 @@ func bindFlags(v *viper.Viper) error {
 func loadConfigFile(v *viper.Viper) error {
 	v.SetConfigName("nvidiactl")
 	v.SetConfigType("toml")
+
 	v.AddConfigPath("/etc")
 	v.AddConfigPath(".")
 
-	if err := v.ReadInConfig(); err != nil {
-		var configFileNotFoundErr viper.ConfigFileNotFoundError
-		if Errors.As(err, &configFileNotFoundErr) {
-			logger.Info().Msg("No config file found. Using defaults and flags.")
-			return nil
-		}
+	configFile := v.GetString("config")
+	if configFile != "" {
+		v.SetConfigFile(configFile)
+	}
 
+	err := v.ReadInConfig()
+	if err != nil {
+		logger.Info().Msg("No config file found. Using defaults and flags.")
 		return errors.Wrap(errors.ErrReadConfig, err)
 	}
+
+	logger.Info().Msgf("Using config file: %s", v.ConfigFileUsed())
 
 	return nil
 }

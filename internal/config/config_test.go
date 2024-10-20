@@ -1,41 +1,43 @@
 package config_test
 
 import (
-	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"codeberg.org/mutker/nvidiactl/internal/config"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestLoad(t *testing.T) {
-	configExample := []byte(`
-    interval = 5
-    temperature = 75
-    fanspeed = 80
-    hysteresis = 3
-    performance = true
-    monitor = false
-    debug = true
-    verbose = false
-    `)
+	// Create a temporary config file
+	tempDir, err := os.MkdirTemp("", "config_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
 
-	// Create a new Viper instance
-	v := viper.New()
-	v.SetConfigType("toml")
+	configContent := []byte(`
+interval = 5
+temperature = 75
+fanspeed = 80
+hysteresis = 3
+performance = true
+monitor = false
+debug = true
+verbose = false
+telemetry = true
+database = "/path/to/telemetry.db"
+`)
+	configPath := filepath.Join(tempDir, "nvidiactl.toml")
+	err = os.WriteFile(configPath, configContent, 0o600)
+	require.NoError(t, err)
 
-	// Read the config
-	err := v.ReadConfig(bytes.NewBuffer(configExample))
-	require.NoError(t, err, "Failed to read config")
+	// Set environment variable to point to the test config file
+	t.Setenv("NVIDIACTL_CONFIG", configPath)
 
-	// Create a new config struct
-	var cfg config.Config
-
-	// Unmarshal the config
-	err = v.Unmarshal(&cfg)
-	require.NoError(t, err, "Failed to unmarshal config")
+	// Load the config
+	cfg, err := config.Load()
+	require.NoError(t, err)
 
 	// Assert
 	assert.Equal(t, 5, cfg.Interval, "Expected Interval 5")
@@ -46,16 +48,14 @@ func TestLoad(t *testing.T) {
 	assert.False(t, cfg.Monitor, "Expected Monitor false")
 	assert.True(t, cfg.Debug, "Expected Debug true")
 	assert.False(t, cfg.Verbose, "Expected Verbose false")
-
-	// Test that the values are in the config
-	assert.True(t, v.InConfig("interval"))
-	assert.True(t, v.InConfig("temperature"))
-	assert.True(t, v.InConfig("fanspeed"))
-	assert.True(t, v.InConfig("performance"))
-	assert.False(t, v.InConfig("nonexistent"))
+	assert.True(t, cfg.Telemetry, "Expected Telemetry true")
+	assert.Equal(t, "/path/to/telemetry.db", cfg.TelemetryDB, "Expected TelemetryDB /path/to/telemetry.db")
 }
 
 func TestLoadDefaults(t *testing.T) {
+	// Ensure no config file is used
+	t.Setenv("NVIDIACTL_CONFIG", "")
+
 	cfg, err := config.Load()
 	require.NoError(t, err, "Failed to load config")
 
@@ -68,4 +68,27 @@ func TestLoadDefaults(t *testing.T) {
 	assert.False(t, cfg.Monitor, "Expected default Monitor false")
 	assert.False(t, cfg.Debug, "Expected default Debug false")
 	assert.False(t, cfg.Verbose, "Expected default Verbose false")
+}
+
+func TestLoadConfigFileInvalidFormat(t *testing.T) {
+	// Create a temporary directory for the test
+	tempDir, err := os.MkdirTemp("", "config_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create an invalid test config file
+	configContent := []byte(`
+This is not a valid TOML file
+`)
+	configPath := filepath.Join(tempDir, "nvidiactl.toml")
+	err = os.WriteFile(configPath, configContent, 0o600)
+	require.NoError(t, err)
+
+	// Set environment variable to point to the invalid config file
+	t.Setenv("NVIDIACTL_CONFIG", configPath)
+
+	// Try to load the config
+	_, err = config.Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Failed to read config file")
 }
