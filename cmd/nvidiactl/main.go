@@ -12,6 +12,7 @@ import (
 	"codeberg.org/mutker/nvidiactl/internal/errors"
 	"codeberg.org/mutker/nvidiactl/internal/gpu"
 	"codeberg.org/mutker/nvidiactl/internal/logger"
+	"codeberg.org/mutker/nvidiactl/internal/telemetry"
 )
 
 const (
@@ -38,6 +39,7 @@ type AppState struct {
 	cfg            *config.Config
 	autoFanControl bool
 	gpuDevice      *gpu.GPU
+	telemetry      *telemetry.TelemetryDB
 }
 
 func main() {
@@ -86,9 +88,23 @@ func New() (*AppState, error) {
 		return nil, errors.Wrap(errors.ErrInitApp, err)
 	}
 
+	var telemetryInstance *telemetry.TelemetryDB
+	if cfg.Telemetry {
+		var err error
+		telemetryInstance, err = telemetry.NewTelemetryDB(cfg.TelemetryDB)
+		if err != nil {
+			logger.Error().Err(err).Msg("Failed to initialize telemetry DB")
+			return nil, errors.Wrap(errors.ErrInitApp, err)
+		}
+		logger.Debug().Msg("Telemetry collection enabled")
+	} else {
+		logger.Debug().Msg("Telemetry collection disabled")
+	}
+
 	return &AppState{
 		cfg:       cfg,
 		gpuDevice: gpuDevice,
+		telemetry: telemetryInstance,
 	}, nil
 }
 
@@ -148,6 +164,11 @@ func (a *AppState) cleanup() {
 	}
 	if err := a.gpuDevice.EnableAutoFanControl(); err != nil {
 		logger.ErrorWithCode(errors.Wrap(errors.ErrEnableAutoFan, err)).Send()
+	}
+	if a.telemetry != nil {
+		if err := a.telemetry.Close(); err != nil {
+			logger.Error().Err(err).Msg("Failed to close telemetry")
+		}
 	}
 	logger.Info().Msg("Exiting...")
 }
@@ -275,6 +296,21 @@ func (a *AppState) logGPUState(state GPUState) {
 			Int("target_power_limit", state.TargetPowerLimit).
 			Int("avg_power_limit", state.AveragePowerLimit).
 			Msg("")
+	}
+	// Record telemetry data if enabled
+	if a.cfg.Telemetry && a.telemetry != nil {
+		a.telemetry.CollectMetrics(telemetry.Metrics{
+			Timestamp:          time.Now(),
+			FanSpeed:           state.CurrentFanSpeed,
+			TargetFanSpeed:     state.TargetFanSpeed,
+			Temperature:        state.CurrentTemperature,
+			AverageTemperature: state.AverageTemperature,
+			PowerLimit:         state.CurrentPowerLimit,
+			TargetPowerLimit:   state.TargetPowerLimit,
+			AveragePowerLimit:  state.AveragePowerLimit,
+			AutoFanControl:     a.autoFanControl,
+			PerformanceMode:    a.cfg.Performance,
+		})
 	}
 }
 
