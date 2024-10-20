@@ -17,6 +17,7 @@ nvidiactl is a command-line tool providing automatic fan speed management and dy
 - 🔧 **Direct GPU interaction** using NVML (NVIDIA Management Library)
 - 🖥️ **Standalone application** or systemd service functionality
 - 🔍 **Debug mode** for detailed logging and troubleshooting
+- 📈 **Telemetry collection** in local database for advanced statistics
 
 ## Installation
 
@@ -28,9 +29,7 @@ Install the `nvidiactl-git` package from the AUR using your preferred AUR helper
    yay -S nvidiactl-git
    ```
 
-After installation, you can enable and start the systemd service with: `sudo systemctl enable --now nvidiactl.service`
-
-If you want to enable verbose or debug logging, add an override with `sudo systemctl edit nvidiactl`:
+After installation, you can enable and start the systemd service with `sudo systemctl enable --now nvidiactl.service`, and if you want to enable verbose or debug logging, add an override with `sudo systemctl edit nvidiactl`:
 
 ```
 [Service]
@@ -54,21 +53,6 @@ ExecStart=/usr/bin/nvidiactl --verbose # or --debug
 
 5. Copy the example configuration file, and edit as needed: `sudo cp nvidiactl.example.conf /etc/nvidiactl.conf`
 
-6. (Optional) Set up the systemd service:
-   ```
-   sudo cp nvidiactl.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now nvidiactl.service
-   ```
-
-   If you want to enable verbose or debug logging, add an override with `sudo systemctl edit nvidiactl`:
-
-  ```
-  [Service]
-  ExecStart=
-  ExecStart=/usr/bin/nvidiactl --verbose
-  ```
-
 ## Configuration
 
 Configuration is done via a TOML file at `/etc/nvidiactl.conf` or through command-line arguments. Command-line arguments take precedence over the config file.
@@ -86,24 +70,30 @@ fanspeed = 100
 # Temperature change required before adjusting fan speed (in Celsius, default: 4)
 hysteresis = 4
 
-# Enable performance mode - disables power limit adjustments (boolean, default: false)
+# Enable performance mode: disables power limit adjustments (boolean, default: false)
 performance = false
 
-# Enable monitor mode - only monitor temperature and fan speed (boolean, default: false)
+# Enable monitor mode: only monitor temperature and fan speed (boolean, default: false)
 monitor = false
 
-# Enable debug mode - output detailed logging (boolean, default: false)
+# Enable debug mode: output detailed logging (boolean, default: false)
 debug = false
 
 # Enable verbose logging (boolean, default: false)
 verbose = false
+
+# Enable telemetry collection (boolean, default: false)
+telemetry = false
+
+# Path to the telemetry database file (string, default: "/var/lib/nvidiactl/telemetry.db")
+database = "/var/lib/nvidiactl/telemetry.db"
 ```
 
 ## Usage
 
-Simply call `nvidiactl` after configuring `/etc/nvidiactl.conf`, or via the command-line, e.g. `nvidiactl --temperature=85 --fanspeed=80 --performance`
+Simply call `nvidiactl` after configuring `/etc/nvidiactl.conf`, or via the command-line, e.g. `nvidiactl --temperature=85 --fanspeed=80 --performance`. Optional telemetry collection in a local SQLite3 database (default: `/var/lib/nvidiactl/telemetry.db`) can be enabled with `--telemetry`.
 
-Enable monitoring mode (only prints statistics, with no change to fan speeds or power limits): `nvidiactl --monitor`
+Enable monitoring mode ("dry run", only prints statistics with no changes to fan speeds or power limits): `nvidiactl --monitor`
 
 ## Building
 
@@ -116,8 +106,8 @@ go build -v -o nvidiactl ./cmd/nvidiactl
 ## Roadmap
 
 - Add presets for fan and power limit adjustment curves that can be applied during runtime
-- Add detailed statistics collector and storage for further analysis
-- Add objective-based (perf vs power vs noise) fan and power limit adjustment curves utilizing statistics
+- Enhance telemetry collection with additional metrics: frequency, memory usage, processes, etc.
+- Add objective-based (perf vs power vs noise) fan and power limit adjustment curves utilizing collected statistics
 
 ## Contributing
 

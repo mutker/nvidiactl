@@ -121,7 +121,7 @@ func (g *GPU) initPowerLimits() error {
 	return g.SetPowerLimit(g.powerLimits.Default)
 }
 
-func (g *GPU) Shutdown() error {
+func (*GPU) Shutdown() error {
 	return nvml.Shutdown()
 }
 

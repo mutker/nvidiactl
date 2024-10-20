@@ -18,6 +18,8 @@ type Config struct {
 	Monitor     bool
 	Verbose     bool
 	Debug       bool
+	Telemetry   bool
+	TelemetryDB string
 }
 
 func Load() (*Config, error) {
@@ -60,6 +62,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("monitor", false)
 	v.SetDefault("debug", false)
 	v.SetDefault("verbose", false)
+	v.SetDefault("telemetry", false)
+	v.SetDefault("database", "/var/lib/nvidiactl/telemetry.db")
 }
 
 func defineFlags(v *viper.Viper) {
@@ -71,6 +75,8 @@ func defineFlags(v *viper.Viper) {
 	pflag.Int("hysteresis", v.GetInt("hysteresis"), "Temperature change required before adjusting fan speed")
 	pflag.Bool("performance", v.GetBool("performance"), "Enable performance mode (disable power limit adjustments)")
 	pflag.Bool("monitor", v.GetBool("monitor"), "Enable monitor mode (only log, don't change settings)")
+	pflag.Bool("telemetry", v.GetBool("telemetry"), "Enable telemetry collection")
+	pflag.String("database", v.GetString("database"), "Path to the telemetry database file")
 	pflag.Parse()
 }
 
@@ -116,6 +122,8 @@ func createConfig(v *viper.Viper) *Config {
 		Monitor:     v.GetBool("monitor"),
 		Debug:       v.GetBool("debug"),
 		Verbose:     v.GetBool("verbose"),
+		Telemetry:   v.GetBool("telemetry"),
+		TelemetryDB: v.GetString("database"),
 	}
 }
 

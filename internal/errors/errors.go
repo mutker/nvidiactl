@@ -30,6 +30,9 @@ const (
 	ErrResetPowerLimit    ErrorCode = "reset_power_limit_failed"
 	ErrInitApp            ErrorCode = "init_app_failed"
 	ErrSetFanSpeed        ErrorCode = "set_fan_speed_failed"
+	ErrInitTelemetry      ErrorCode = "init_telemetry_failed"
+	ErrCollectTelemetry   ErrorCode = "collect_telemetry_failed"
+	ErrCloseTelemetry     ErrorCode = "close_telemetry_failed"
 )
 
 var errorMessages = map[ErrorCode]string{
@@ -55,6 +58,9 @@ var errorMessages = map[ErrorCode]string{
 	ErrResetPowerLimit:    "Failed to reset power limit",
 	ErrInitApp:            "Failed to initialize application",
 	ErrSetFanSpeed:        "Failed to set fan speed",
+	ErrInitTelemetry:      "Failed to initialize telemetry db",
+	ErrCollectTelemetry:   "Failed to collect telemetry",
+	ErrCloseTelemetry:     "Failed to close telemetry db",
 }
 
 type AppError struct {

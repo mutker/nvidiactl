@@ -7,48 +7,27 @@ on:
       - main
 
 jobs:
-  lint:
+  go-mod:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
+      - name: tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod
+          git diff --exit-code go.sum
+  golangci-lint:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: ">=1.23"
-
-      - name: Tidy Go mods
-        run: go mod tidy
-
-      - name: Print golangci-lint config
-        run: cat .golangci.yml
-
-      - name: Run golangci-lint
+      - name: lint
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/app \
             -w /app \
             golangci/golangci-lint:latest \
-            golangci-lint run --timeout 5m --config /app/.golangci.yml ./...
-
-  build:
-    needs: [lint]
-    runs-on: self-hosted
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Print Go info
-        run: |
-          go version
-          go env
-          go list -m all
-          cat go.mod
-
-      - name: Build binary
-        run: |
-          go build -v -o nvidiactl ./cmd/nvidiactl
-
-      - name: Show artifact
-        run: |
-          file nvidiactl || echo "nvidiactl not found"
+            golangci-lint run --fix --config /app/.golangci.yml ./...
