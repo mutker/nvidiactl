@@ -2,8 +2,8 @@ linters:
   enable-all: true
   disable:
     - copyloopvar
-    - intrange
     - depguard
+    - inamedparam # Our domain types are self-documenting
     - execinquery
     - exhaustruct
     - exportloopref
@@ -11,6 +11,10 @@ linters:
     - gci # https://github.com/golangci/golangci-lint/issues/1490
     - godot
     - gomnd
+    - interfacebloat # Our domain interface is intentionally comprehensive
+    - intrange
+    - ireturn # We want to return interfaces in DDD
+    # - nlreturn
     - varnamelen
     - wsl
     - zerologlint
@@ -53,7 +57,7 @@ linters-settings:
     # Default: 5
     min-complexity: 10
   nlreturn:
-    block-size: 3
+    block-size: 10
   nolintlint:
     allow-unused: false # report any unused nolint directives
     require-explanation: true # require an explanation for nolint directives

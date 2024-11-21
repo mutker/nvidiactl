@@ -1,328 +1,290 @@
 package gpu
 
 import (
-	"errors"
-	"fmt"
-	"math"
 	"sync"
 
+	"codeberg.org/mutker/nvidiactl/internal/errors"
 	"codeberg.org/mutker/nvidiactl/internal/logger"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 )
 
 const (
+	defaultDeviceIndex    = 0
 	temperatureWindowSize = 5
-	powerLimitWindowSize  = 5
-	milliWattsToWatts     = 1000
 )
 
-var (
-	ErrUninitializedGPU  = errors.New("GPU not initialized")
-	ErrNVMLFailure       = errors.New("NVML operation failed")
-	ErrPowerLimitTooHigh = errors.New("power limit too high")
-	ErrPowerLimitTooLow  = errors.New("power limit too low")
-)
-
-type Limits struct {
-	Min, Max, Default int
+type controller struct {
+	nvml            nvmlController
+	device          nvml.Device
+	fanController   FanController
+	powerController PowerController
+	tempHistory     []Temperature
+	tempMu          sync.RWMutex // Separate mutex for temperature history
+	initialized     bool
+	mu              sync.RWMutex
 }
 
-type GPU struct {
-	device             nvml.Device
-	fanCount           int
-	fanSpeedLimits     Limits
-	powerLimits        Limits
-	currentFanSpeeds   []int
-	lastFanSpeeds      []int
-	currentPowerLimit  int
-	lastPowerLimit     int
-	temperatureHistory []int
-	powerLimitHistory  []int
-	mu                 sync.RWMutex
+// New creates a new GPU controller instance
+func New() (Controller, error) {
+	c := &controller{
+		nvml:        &nvmlWrapper{},
+		tempHistory: make([]Temperature, 0, temperatureWindowSize),
+	}
+
+	return c, nil
 }
 
-func New() (*GPU, error) {
-	if ret := nvml.Init(); ret != nvml.SUCCESS {
-		return nil, fmt.Errorf("%w: %v", ErrNVMLFailure, nvml.ErrorString(ret))
+// Initialize prepares the GPU controller for operation
+func (c *controller) Initialize() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.initialized {
+		return nil
 	}
 
-	device, ret := nvml.DeviceGetHandleByIndex(0)
-	if ret != nvml.SUCCESS {
-		return nil, fmt.Errorf("%w: %v", ErrNVMLFailure, nvml.ErrorString(ret))
+	logger.Debug().Msg("Initializing NVML...")
+	if err := c.nvml.Initialize(); err != nil {
+		logger.Debug().Err(err).Msg("NVML initialization failed")
+		return errors.Wrap(ErrInitFailed, err)
 	}
+	logger.Debug().Msg("NVML initialized successfully")
 
-	g := &GPU{device: device}
-	if err := g.initialize(); err != nil {
-		return nil, err
-	}
-
-	return g, nil
-}
-
-func (g *GPU) initialize() error {
-	if name, ret := g.device.GetName(); ret == nvml.SUCCESS {
-		logger.Info().Msgf("Detected GPU: %v", name)
-	} else {
-		logger.Warn().Msgf("Failed to get GPU name: %v", nvml.ErrorString(ret))
-	}
-
-	var err error
-	if g.fanCount, err = g.GetFanCount(); err != nil {
-		return fmt.Errorf("failed to get GPU fan count: %w", err)
-	}
-	logger.Debug().Msgf("Detected fans: %d", g.fanCount)
-
-	if err := g.initFanSpeed(); err != nil {
-		return fmt.Errorf("failed to initialize fan speed: %w", err)
-	}
-
-	if err := g.initPowerLimits(); err != nil {
-		return fmt.Errorf("failed to initialize power limits: %w", err)
-	}
-
-	return nil
-}
-
-func (g *GPU) initFanSpeed() error {
-	var err error
-	g.fanSpeedLimits, err = g.getMinMaxFanSpeed()
+	logger.Debug().Msg("Getting GPU device...")
+	device, err := c.nvml.GetDevice(defaultDeviceIndex)
 	if err != nil {
-		return err
+		logger.Debug().Err(err).Msg("Failed to get GPU device")
+		return errors.Wrap(ErrInitFailed, err)
 	}
+	logger.Debug().Msg("GPU device acquired")
+	c.device = device
 
-	g.currentFanSpeeds = make([]int, g.fanCount)
-	g.lastFanSpeeds = make([]int, g.fanCount)
-
-	for i := 0; i < g.fanCount; i++ {
-		if g.currentFanSpeeds[i], err = g.getFanSpeed(i); err != nil {
-			return fmt.Errorf("failed to get current fan speed for fan %d: %w", i, err)
-		}
-		g.lastFanSpeeds[i] = g.currentFanSpeeds[i]
-	}
-
-	logger.Debug().Msgf("Detected fan speeds: %v", g.currentFanSpeeds)
-
-	return nil
-}
-
-func (g *GPU) initPowerLimits() error {
-	var err error
-	g.powerLimits, err = g.GetMinMaxPowerLimits()
+	// Initialize fan controller
+	logger.Debug().Msg("Initializing fan controller...")
+	fanCtrl, err := newFanController(device)
 	if err != nil {
-		return err
+		logger.Debug().Err(err).Msg("Failed to initialize fan controller")
+		return errors.Wrap(ErrInitFailed, err)
 	}
+	logger.Debug().Msg("Fan controller initialized")
+	c.fanController = fanCtrl
 
-	if g.currentPowerLimit, err = g.GetPowerLimit(); err != nil {
-		return err
+	// Initialize power controller
+	logger.Debug().Msg("Initializing power controller...")
+	powerCtrl, err := newPowerController(device)
+	if err != nil {
+		logger.Debug().Err(err).Msg("Failed to initialize power controller")
+		return errors.Wrap(ErrInitFailed, err)
 	}
+	logger.Debug().Msg("Power controller initialized")
+	c.powerController = powerCtrl
 
-	logger.Debug().Msgf("Detected power limit: %dW", g.currentPowerLimit)
-
-	return g.SetPowerLimit(g.powerLimits.Default)
-}
-
-func (*GPU) Shutdown() error {
-	return nvml.Shutdown()
-}
-
-func (g *GPU) GetFanCount() (int, error) {
-	count, ret := g.device.GetNumFans()
-	if ret != nvml.SUCCESS {
-		return 0, fmt.Errorf("%w: %v", ErrNVMLFailure, nvml.ErrorString(ret))
-	}
-
-	return count, nil
-}
-
-func (g *GPU) GetTemperature() (int, error) {
-	temp, ret := g.device.GetTemperature(nvml.TEMPERATURE_GPU)
-	if ret != nvml.SUCCESS {
-		return 0, fmt.Errorf("%w: %v", ErrNVMLFailure, nvml.ErrorString(ret))
-	}
-
-	return int(temp), nil
-}
-
-func (g *GPU) getFanSpeed(fanIndex int) (int, error) {
-	speed, ret := g.device.GetFanSpeed_v2(fanIndex)
-	if ret != nvml.SUCCESS {
-		return 0, fmt.Errorf("%w: %v", ErrNVMLFailure, nvml.ErrorString(ret))
-	}
-
-	return int(speed), nil
-}
-
-func (g *GPU) getMinMaxFanSpeed() (Limits, error) {
-	minLimit, maxLimit, ret := g.device.GetMinMaxFanSpeed()
-	if ret != nvml.SUCCESS {
-		return Limits{}, fmt.Errorf("%w: %v", ErrNVMLFailure, nvml.ErrorString(ret))
-	}
-
-	return Limits{Min: minLimit, Max: maxLimit}, nil
-}
-
-func (g *GPU) SetFanSpeed(fanSpeed int) error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	for i := 0; i < g.fanCount; i++ {
-		if ret := nvml.DeviceSetFanSpeed_v2(g.device, i, fanSpeed); ret != nvml.SUCCESS {
-			return fmt.Errorf("%w: failed to set fan %d speed: %v", ErrNVMLFailure, i, nvml.ErrorString(ret))
-		}
-		g.lastFanSpeeds[i] = g.currentFanSpeeds[i]
-		g.currentFanSpeeds[i] = fanSpeed
-	}
-	logger.Debug().Msgf("Set fan speed: %d%%", fanSpeed)
+	c.initialized = true
+	logger.Debug().Msg("GPU controller initialization complete")
 
 	return nil
 }
 
-func (g *GPU) EnableAutoFanControl() error {
-	for i := 0; i < g.fanCount; i++ {
-		if ret := nvml.DeviceSetDefaultFanSpeed_v2(g.device, i); ret != nvml.SUCCESS {
-			return fmt.Errorf("%w: failed to set default fan speed for fan %d: %v", ErrNVMLFailure, i, nvml.ErrorString(ret))
-		}
+// Shutdown performs cleanup of GPU resources
+func (c *controller) Shutdown() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.initialized {
+		return nil
 	}
-	logger.Debug().Msg("Auto fan control: enabled")
+
+	logger.Debug().Msg("Shutting down GPU controller...")
+	if err := c.nvml.Shutdown(); err != nil {
+		logger.Debug().Err(err).Msg("NVML shutdown failed")
+		return errors.Wrap(ErrShutdownFailed, err)
+	}
+
+	c.initialized = false
+	logger.Debug().Msg("GPU controller shutdown complete")
 
 	return nil
 }
 
-func (g *GPU) GetPowerLimit() (int, error) {
-	limit, ret := g.device.GetPowerManagementLimit()
+// GetTemperature returns the current GPU temperature
+func (c *controller) GetTemperature() (Temperature, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if !c.initialized {
+		return 0, errors.New(ErrNotInitialized)
+	}
+
+	logger.Debug().Msg("Reading GPU temperature...")
+	temp, ret := c.device.GetTemperature(nvml.TEMPERATURE_GPU)
 	if ret != nvml.SUCCESS {
-		return 0, fmt.Errorf("%w: %v", ErrNVMLFailure, nvml.ErrorString(ret))
+		logger.Debug().Str("error", nvml.ErrorString(ret)).Msg("Failed to read temperature")
+		return 0, errors.Wrap(ErrTemperatureReadFailed, nvml.ErrorString(ret))
 	}
 
-	return int(limit / milliWattsToWatts), nil
+	temperature := Temperature(temp)
+	logger.Debug().Int("temperature", int(temperature)).Msg("Temperature read successful")
+
+	return temperature, nil
 }
 
-func (g *GPU) GetPowerLimits() Limits {
-	return g.powerLimits
-}
+// GetAverageTemperature returns the moving average of GPU temperature
+func (c *controller) GetAverageTemperature() Temperature {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
-func (g *GPU) GetFanSpeedLimits() Limits {
-	return g.fanSpeedLimits
-}
-
-func (g *GPU) GetMinMaxPowerLimits() (Limits, error) {
-	minLimit, maxLimit, ret := g.device.GetPowerManagementLimitConstraints()
-	if ret != nvml.SUCCESS {
-		return Limits{}, fmt.Errorf("%w: %v", ErrNVMLFailure, nvml.ErrorString(ret))
+	if len(c.tempHistory) == 0 {
+		return 0
 	}
 
-	def, ret := g.device.GetPowerManagementDefaultLimit()
-	if ret != nvml.SUCCESS {
-		return Limits{}, fmt.Errorf("%w: %v", ErrNVMLFailure, nvml.ErrorString(ret))
-	}
-
-	return Limits{
-		Min:     int(minLimit / milliWattsToWatts),
-		Max:     int(maxLimit / milliWattsToWatts),
-		Default: int(def / milliWattsToWatts),
-	}, nil
-}
-
-func (g *GPU) SetPowerLimit(powerLimit int) error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	// Check for negative values
-	if powerLimit < 0 {
-		return fmt.Errorf("%w: %d", ErrPowerLimitTooLow, powerLimit)
-	}
-
-	// Check for potential overflow
-	if powerLimit > math.MaxUint32/milliWattsToWatts {
-		return fmt.Errorf("%w: %d", ErrPowerLimitTooHigh, powerLimit)
-	}
-
-	limitInMilliWatts := uint32(powerLimit) * milliWattsToWatts
-
-	if ret := g.device.SetPowerManagementLimit(limitInMilliWatts); ret != nvml.SUCCESS {
-		return fmt.Errorf("%w: %v", ErrNVMLFailure, nvml.ErrorString(ret))
-	}
-
-	logger.Debug().Msgf("Set power limit: %dW", powerLimit)
-	g.lastPowerLimit = g.currentPowerLimit
-	g.currentPowerLimit = powerLimit
-
-	return nil
-}
-
-func (g *GPU) UpdateTemperatureHistory(currentTemperature int) int {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	g.temperatureHistory = append(g.temperatureHistory, currentTemperature)
-	if len(g.temperatureHistory) > temperatureWindowSize {
-		g.temperatureHistory = g.temperatureHistory[1:]
-	}
-
-	sum := 0
-	for _, temp := range g.temperatureHistory {
+	var sum Temperature
+	for _, temp := range c.tempHistory {
 		sum += temp
 	}
 
-	return sum / len(g.temperatureHistory)
+	return sum / Temperature(len(c.tempHistory))
 }
 
-func (g *GPU) UpdatePowerLimitHistory(newPowerLimit int) int {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+func (c *controller) UpdateTemperatureHistory(temp Temperature) Temperature {
+	logger.Debug().Int("temp", int(temp)).Msg("Starting temperature history update")
 
-	g.powerLimitHistory = append(g.powerLimitHistory, newPowerLimit)
-	if len(g.powerLimitHistory) > powerLimitWindowSize {
-		g.powerLimitHistory = g.powerLimitHistory[1:]
+	c.tempMu.Lock()
+	defer c.tempMu.Unlock()
+
+	c.tempHistory = append(c.tempHistory, temp)
+	if len(c.tempHistory) > temperatureWindowSize {
+		c.tempHistory = c.tempHistory[1:]
 	}
 
-	sum := 0
-	for _, limit := range g.powerLimitHistory {
-		sum += limit
+	var sum Temperature
+	for _, t := range c.tempHistory {
+		sum += t
+	}
+	avg := sum / Temperature(len(c.tempHistory))
+
+	logger.Debug().
+		Int("historySize", len(c.tempHistory)).
+		Int("average", int(avg)).
+		Msg("Temperature history updated")
+
+	return avg
+}
+
+// GetFanControl returns the fan controller interface
+func (c *controller) GetFanControl() FanController {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.fanController
+}
+
+// GetCurrentFanSpeeds returns the current speeds of all fans
+func (c *controller) GetCurrentFanSpeeds() []FanSpeed {
+	if c.fanController == nil {
+		return nil
+	}
+	return c.fanController.GetCurrentSpeeds()
+}
+
+func (c *controller) SetFanSpeed(speed FanSpeed) error {
+	if c.fanController == nil {
+		return errors.New(ErrNotInitialized)
+	}
+	if err := c.fanController.SetSpeed(speed); err != nil {
+		return errors.Wrap(ErrSetFanSpeed, err)
+	}
+	return nil
+}
+
+func (c *controller) GetLastFanSpeeds() []FanSpeed {
+	if c.fanController == nil {
+		return nil
+	}
+	return c.fanController.GetLastSpeeds()
+}
+
+func (c *controller) GetFanSpeedLimits() FanSpeedLimits {
+	if c.fanController == nil {
+		return FanSpeedLimits{}
+	}
+	return c.fanController.GetSpeedLimits()
+}
+
+// EnableAutoFanControl enables automatic fan control
+func (c *controller) EnableAutoFanControl() error {
+	if !c.initialized {
+		return errors.New(ErrNotInitialized)
+	}
+	if err := c.fanController.EnableAuto(); err != nil {
+		return errors.Wrap(ErrEnableAutoFan, err)
+	}
+	return nil
+}
+
+// DisableAutoFanControl disables automatic fan control
+func (c *controller) DisableAutoFanControl() error {
+	if !c.initialized {
+		return errors.New(ErrNotInitialized)
+	}
+	if err := c.fanController.DisableAuto(); err != nil {
+		return errors.Wrap(ErrDisableAutoFan, err)
+	}
+	return nil
+}
+
+// GetPowerControl returns the power controller interface
+func (c *controller) GetPowerControl() PowerController {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.powerController
+}
+
+// GetCurrentPowerLimit returns the current power limit
+func (c *controller) GetCurrentPowerLimit() PowerLimit {
+	if c.powerController == nil {
+		return 0
+	}
+	return c.powerController.GetCurrentLimit()
+}
+
+// SetPowerLimit sets the power limit
+func (c *controller) SetPowerLimit(limit PowerLimit) error {
+	if c.powerController == nil {
+		return errors.New(ErrNotInitialized)
+	}
+	if err := c.powerController.SetLimit(limit); err != nil {
+		return errors.Wrap(ErrSetPowerLimit, err)
+	}
+	return nil
+}
+
+// GetPowerLimits returns the power limit constraints
+func (c *controller) GetPowerLimits() PowerLimits {
+	if c.powerController == nil {
+		return PowerLimits{}
+	}
+	return c.powerController.GetLimits()
+}
+
+func (c *controller) UpdatePowerLimitHistory(limit PowerLimit) PowerLimit {
+	if c.powerController == nil {
+		return 0
+	}
+	return c.powerController.UpdateHistory(limit)
+}
+
+// Name returns the GPU device name
+func (c *controller) Name() (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if !c.initialized {
+		return "", errors.New(ErrNotInitialized)
 	}
 
-	return sum / len(g.powerLimitHistory)
-}
-
-func (g *GPU) GetCurrentFanSpeeds() []int {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	return g.currentFanSpeeds
-}
-
-func (g *GPU) GetLastFanSpeeds() []int {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	return g.lastFanSpeeds
-}
-
-func (g *GPU) GetCurrentPowerLimit() int {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	return g.currentPowerLimit
-}
-
-func (g *GPU) GetLastPowerLimit() int {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	return g.lastPowerLimit
-}
-
-func (g *GPU) ClampFanSpeed(fanSpeed int) int {
-	return clamp(fanSpeed, g.fanSpeedLimits.Min, g.fanSpeedLimits.Max)
-}
-
-func (g *GPU) ClampPowerLimit(powerLimit int) int {
-	return clamp(powerLimit, g.powerLimits.Min, g.powerLimits.Max)
-}
-
-func clamp(value, minValue, maxValue int) int {
-	if value < minValue {
-		return minValue
-	}
-	if value > maxValue {
-		return maxValue
+	name, ret := c.device.GetName()
+	if ret != nvml.SUCCESS {
+		return "", errors.Wrap(ErrDeviceInfoFailed, nvml.ErrorString(ret))
 	}
 
-	return value
+	return name, nil
 }
