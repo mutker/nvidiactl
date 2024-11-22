@@ -20,14 +20,84 @@ nvidiactl/
 │   └── nvidiactl/          # Application entry point and workflow coordination
 ├── internal/
 │   ├── domain1/            # Domain-specific package
-│   │   ├── interface.go    # Public domain interfaces
-│   │   ├── domain1.go      # Internal domain implementation
-│   │   └── errors.go       # Domain-specific errors
-│   ├── config/             # Configuration management
-│   ├── errors/             # Central error definitions
+│   │   ├── domain1.go      # Internal implementation of interfaces
+│   │   ├── config.go       # Domain configuration
+│   │   ├── errors.go       # Domain-specific errors
+│   │   ├── interface.go    # Public domain interfaces and types
+│   │   ├── repository.go   # Data access implementation
+│   │   ├── schema.go       # Data structure definitions
+│   │   └── utils.go        # (Optional) Domain-specific utilities
+│   ├── config/             # Config infrastructure
+│   ├── errors/             # Error infrastructure
 │   └── logger/             # Logging infrastructure
-└── pkg/                    # Public API packages (if any)
+└── pkg/
 ```
+
+### Package Naming
+
+1. **Domain Packages**: Named after their core domain concept (e.g., gpu, telemetry)
+2. **Infrastructure Packages**: Named after their cross-cutting concern (e.g., config, errors, logger)
+3. **Command Packages**: Named after the executable they produce (e.g., nvidiactl)
+
+### File Naming Conventions
+
+1. **interface.go**: Contains all public interfaces and domain types
+2. **{domain}.go**: Main domain implementation file, named after the package (e.g., telemetry.go, gpu.go)
+3. **repository.go**: Data access interface and implementation
+4. **config.go**: Domain configuration
+5. **errors.go**: Domain-specific error codes
+6. **schema.go**: Data structure definitions (if applicable)
+7. **{file}_test.go**: Tests for the corresponding implementation file
+
+### File Responsibilities
+
+#### {domain}.go (e.g., telemetry.go, gpu.go)
+- Primary domain implementation
+- Implements interfaces defined in interface.go
+- Contains core domain logic
+- Named after the package for clear ownership
+
+#### interface.go
+- Public domain interfaces
+- Domain types and value objects
+- No implementation details
+
+#### repository.go
+- Data access interface
+- Storage implementation
+- Schema management
+
+#### config.go
+- Domain-specific configuration
+- Configuration validation
+- Default values
+
+#### errors.go
+- Domain-specific error codes
+- Error constructors
+- Error handling utilities
+
+#### schema.go
+- Data structure definitions
+- Schema initialization
+- Storage format specifications
+
+### Package Dependencies
+
+1. **Domain Package Dependencies**:
+   - May depend on infrastructure packages (errors, logger, config)
+   - Should not depend on other domain packages
+   - Should expose clear interfaces for other packages to consume
+
+2. **Infrastructure Package Dependencies**:
+   - Should not depend on domain packages
+   - May depend on other infrastructure packages
+   - Should provide domain-agnostic functionality
+
+3. **Command Package Dependencies**:
+   - May depend on both domain and infrastructure packages
+   - Responsible for wiring dependencies together
+   - Should not expose any types to other packages
 
 ## Package Responsibilities
 

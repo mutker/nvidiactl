@@ -6,8 +6,7 @@ import (
 	"codeberg.org/mutker/nvidiactl/internal/errors"
 )
 
-// InitSchema initializes the database schema for telemetry data
-func InitSchema(db *sql.DB) error {
+func initSchema(db *sql.DB) error {
 	_, err := db.Exec(`
         CREATE TABLE IF NOT EXISTS telemetry (
             timestamp INTEGER PRIMARY KEY,
@@ -23,7 +22,7 @@ func InitSchema(db *sql.DB) error {
         )
     `)
 	if err != nil {
-		return errors.Wrap(errors.ErrInitTelemetry, err)
+		return errors.Wrap(ErrSchemaInitFailed, err)
 	}
 
 	return nil

@@ -41,7 +41,7 @@ type AppState struct {
 	cfg            *config.Config
 	autoFanControl bool
 	gpuDevice      gpu.Controller
-	telemetry      *telemetry.Database
+	telemetry      telemetry.Collector
 }
 
 func main() {
@@ -118,18 +118,19 @@ func New() (*AppState, error) {
 		return nil, errors.Wrap(errors.ErrInitApp, err)
 	}
 
-	// Initialize the GPU
 	if err := gpuDevice.Initialize(); err != nil {
 		logger.Debug().Err(err).Msg("Failed to initialize GPU controller")
 		return nil, errors.Wrap(errors.ErrInitApp, err)
 	}
 
-	var telemetryInstance *telemetry.Database
+	var collector telemetry.Collector
 	if cfg.Telemetry {
 		var err error
-		telemetryInstance, err = telemetry.NewTelemetryDB(cfg.TelemetryDB)
+		collector, err = telemetry.NewService(telemetry.Config{
+			DBPath: cfg.TelemetryDB,
+		})
 		if err != nil {
-			logger.Error().Err(err).Msg("Failed to initialize telemetry DB")
+			logger.Error().Err(err).Msg("Failed to initialize telemetry")
 			return nil, errors.Wrap(errors.ErrInitApp, err)
 		}
 		logger.Debug().Msg("Telemetry collection enabled")
@@ -142,7 +143,7 @@ func New() (*AppState, error) {
 	return &AppState{
 		cfg:       cfg,
 		gpuDevice: gpuDevice,
-		telemetry: telemetryInstance,
+		telemetry: collector,
 	}, nil
 }
 
@@ -164,7 +165,7 @@ func (a *AppState) loop(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Debug().Msg("Context canceld, exiting loop")
+			logger.Debug().Msg("Context canceled, exiting loop")
 			return nil
 		case <-ticker.C:
 			logger.Debug().Msg("Tick: updating GPU state")
@@ -182,13 +183,12 @@ func (a *AppState) loop(ctx context.Context) error {
 					return err
 				}
 			} else {
-				// In monitor mode, calculate target values without applying them
 				state.TargetFanSpeed = a.calculateFanSpeed(state.AverageTemperature, a.cfg.Temperature, a.cfg.FanSpeed)
 				state.TargetPowerLimit = a.calculatePowerLimit(state.CurrentTemperature, a.cfg.Temperature,
 					state.CurrentFanSpeed, a.cfg.FanSpeed, state.CurrentPowerLimit)
 			}
 
-			a.logGPUState(state)
+			a.logGPUState(ctx, state)
 		}
 	}
 }
@@ -320,53 +320,7 @@ func (a *AppState) setGPUState(state *GPUState) (GPUState, error) {
 	return *state, nil
 }
 
-func (a *AppState) handleFanControl(state *GPUState, targetFanSpeed int) error {
-	if state.AverageTemperature <= minTemperature {
-		if !a.autoFanControl {
-			if err := a.gpuDevice.EnableAutoFanControl(); err != nil {
-				return errors.Wrap(errors.ErrEnableAutoFan, err)
-			}
-			a.autoFanControl = true
-		}
-	} else {
-		if a.autoFanControl {
-			logger.Debug().Msgf("Temperature (%d°C) above minimum (%d°C). Switching to manual fan control.",
-				state.AverageTemperature, minTemperature)
-			a.autoFanControl = false
-		}
-		if !a.autoFanControl && !applyHysteresis(targetFanSpeed, state.CurrentFanSpeed, a.cfg.Hysteresis) {
-			if err := a.gpuDevice.SetFanSpeed(gpu.FanSpeed(targetFanSpeed)); err != nil {
-				return errors.Wrap(gpu.ErrSetFanSpeed, err)
-			}
-			logger.Debug().Msgf("Fan speed changed from %d to %d", state.CurrentFanSpeed, targetFanSpeed)
-		}
-	}
-
-	return nil
-}
-
-func (a *AppState) handlePowerLimit(state *GPUState, targetPowerLimit int) error {
-	if !a.cfg.Performance {
-		if !applyHysteresis(targetPowerLimit, state.CurrentPowerLimit, powerLimitHysteresis) {
-			if err := a.gpuDevice.SetPowerLimit(gpu.PowerLimit(targetPowerLimit)); err != nil {
-				return errors.Wrap(gpu.ErrSetPowerLimit, err)
-			}
-			logger.Debug().Msgf("Power limit changed from %d to %d", state.CurrentPowerLimit, targetPowerLimit)
-		}
-	} else {
-		maxPowerLimit := a.gpuDevice.GetPowerLimits().Max
-		if state.CurrentPowerLimit < int(maxPowerLimit) {
-			if err := a.gpuDevice.SetPowerLimit(maxPowerLimit); err != nil {
-				return errors.Wrap(gpu.ErrSetPowerLimit, err)
-			}
-			logger.Debug().Msgf("Power limit set to max: %d", maxPowerLimit)
-		}
-	}
-
-	return nil
-}
-
-func (a *AppState) logGPUState(state GPUState) {
+func (a *AppState) logGPUState(ctx context.Context, state GPUState) {
 	if a.cfg.Debug {
 		lastFanSpeeds := a.gpuDevice.GetLastFanSpeeds()
 		powerLimits := a.gpuDevice.GetPowerLimits()
@@ -417,26 +371,79 @@ func (a *AppState) logGPUState(state GPUState) {
 			Msg("")
 	}
 
-	// Update telemetry with the same logic
+	// Collect telemetry in database, if enabled
 	if a.cfg.Telemetry && a.telemetry != nil {
-		targetFanSpeed := state.TargetFanSpeed
-		if a.autoFanControl {
-			targetFanSpeed = 0
+		snapshot := &telemetry.MetricsSnapshot{
+			Timestamp: time.Now(),
+			FanSpeed: telemetry.FanMetrics{
+				Current: state.CurrentFanSpeed,
+				Target:  state.TargetFanSpeed,
+			},
+			Temperature: telemetry.TempMetrics{
+				Current: float64(state.CurrentTemperature),
+				Average: float64(state.AverageTemperature),
+			},
+			PowerLimit: telemetry.PowerMetrics{
+				Current: state.CurrentPowerLimit,
+				Target:  state.TargetPowerLimit,
+				Average: float64(state.AveragePowerLimit),
+			},
+			SystemState: telemetry.StateMetrics{
+				AutoFanControl:  a.autoFanControl,
+				PerformanceMode: a.cfg.Performance,
+			},
 		}
 
-		a.telemetry.CollectMetrics(&telemetry.Metrics{
-			Timestamp:          time.Now(),
-			FanSpeed:           state.CurrentFanSpeed,
-			TargetFanSpeed:     targetFanSpeed,
-			Temperature:        state.CurrentTemperature,
-			AverageTemperature: state.AverageTemperature,
-			PowerLimit:         state.CurrentPowerLimit,
-			TargetPowerLimit:   state.TargetPowerLimit,
-			AveragePowerLimit:  state.AveragePowerLimit,
-			AutoFanControl:     a.autoFanControl,
-			PerformanceMode:    a.cfg.Performance,
-		})
+		if err := a.telemetry.Record(ctx, snapshot); err != nil {
+			logger.Error().Err(err).Msg("Failed to record telemetry metrics")
+		}
 	}
+}
+
+func (a *AppState) handleFanControl(state *GPUState, targetFanSpeed int) error {
+	if state.AverageTemperature <= minTemperature {
+		if !a.autoFanControl {
+			if err := a.gpuDevice.EnableAutoFanControl(); err != nil {
+				return errors.Wrap(errors.ErrEnableAutoFan, err)
+			}
+			a.autoFanControl = true
+		}
+	} else {
+		if a.autoFanControl {
+			logger.Debug().Msgf("Temperature (%d°C) above minimum (%d°C). Switching to manual fan control.",
+				state.AverageTemperature, minTemperature)
+			a.autoFanControl = false
+		}
+		if !a.autoFanControl && !applyHysteresis(targetFanSpeed, state.CurrentFanSpeed, a.cfg.Hysteresis) {
+			if err := a.gpuDevice.SetFanSpeed(gpu.FanSpeed(targetFanSpeed)); err != nil {
+				return errors.Wrap(gpu.ErrSetFanSpeed, err)
+			}
+			logger.Debug().Msgf("Fan speed changed from %d to %d", state.CurrentFanSpeed, targetFanSpeed)
+		}
+	}
+
+	return nil
+}
+
+func (a *AppState) handlePowerLimit(state *GPUState, targetPowerLimit int) error {
+	if !a.cfg.Performance {
+		if !applyHysteresis(targetPowerLimit, state.CurrentPowerLimit, powerLimitHysteresis) {
+			if err := a.gpuDevice.SetPowerLimit(gpu.PowerLimit(targetPowerLimit)); err != nil {
+				return errors.Wrap(gpu.ErrSetPowerLimit, err)
+			}
+			logger.Debug().Msgf("Power limit changed from %d to %d", state.CurrentPowerLimit, targetPowerLimit)
+		}
+	} else {
+		maxPowerLimit := a.gpuDevice.GetPowerLimits().Max
+		if state.CurrentPowerLimit < int(maxPowerLimit) {
+			if err := a.gpuDevice.SetPowerLimit(maxPowerLimit); err != nil {
+				return errors.Wrap(gpu.ErrSetPowerLimit, err)
+			}
+			logger.Debug().Msgf("Power limit set to max: %d", maxPowerLimit)
+		}
+	}
+
+	return nil
 }
 
 func (a *AppState) calculateFanSpeed(averageTemperature, maxTemperature, configMaxFanSpeed int) int {
