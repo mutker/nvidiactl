@@ -1,6 +1,8 @@
 package config
 
 import (
+	"strings"
+
 	"codeberg.org/mutker/nvidiactl/internal/errors"
 	"codeberg.org/mutker/nvidiactl/internal/logger"
 	"github.com/spf13/pflag"
@@ -8,16 +10,16 @@ import (
 )
 
 type Config struct {
-	Interval    int
-	Temperature int
-	FanSpeed    int
-	Hysteresis  int
-	Performance bool
-	Monitor     bool
-	Verbose     bool
-	Debug       bool
-	Telemetry   bool
-	TelemetryDB string
+	Interval    int    `mapstructure:"interval"`
+	Temperature int    `mapstructure:"temperature"`
+	FanSpeed    int    `mapstructure:"fanspeed"`
+	Hysteresis  int    `mapstructure:"hysteresis"`
+	Performance bool   `mapstructure:"performance"`
+	Monitor     bool   `mapstructure:"monitor"`
+	Debug       bool   `mapstructure:"debug"`
+	Verbose     bool   `mapstructure:"verbose"`
+	Telemetry   bool   `mapstructure:"telemetry"`
+	TelemetryDB string `mapstructure:"database"`
 }
 
 func Load() (*Config, error) {
@@ -61,6 +63,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("verbose", false)
 	v.SetDefault("telemetry", false)
 	v.SetDefault("database", "/var/lib/nvidiactl/telemetry.db")
+
+	// Register all config keys that might be in the config file
+	// v.RegisterAlias("fan_speed", "fanspeed")
+	// v.RegisterAlias("fan-speed", "fanspeed")
 }
 
 func defineFlags(v *viper.Viper) {
@@ -86,7 +92,7 @@ func bindFlags(v *viper.Viper) error {
 }
 
 func loadConfigFile(v *viper.Viper) error {
-	v.SetConfigName("nvidiactl")
+	v.SetConfigName("nvidiactl.conf")
 	v.SetConfigType("toml")
 
 	v.AddConfigPath("/etc")
@@ -99,11 +105,24 @@ func loadConfigFile(v *viper.Viper) error {
 
 	err := v.ReadInConfig()
 	if err != nil {
-		logger.Info().Msg("No config file found. Using defaults and flags.")
+		var configFileNotFound viper.ConfigFileNotFoundError
+		if errors.As(err, &configFileNotFound) {
+			logger.Info().Msg("No config file found. Using defaults and flags.")
+			return nil
+		}
+		// For any other error, log more details
+		logger.Debug().
+			Err(err).
+			Str("configFile", configFile).
+			Str("searchPaths", "/etc,./").
+			Msg("Error reading config file")
+
 		return errors.Wrap(errors.ErrReadConfig, err)
 	}
 
-	logger.Info().Msgf("Using config file: %s", v.ConfigFileUsed())
+	logger.Info().
+		Str("file", v.ConfigFileUsed()).
+		Msg("Config file loaded successfully")
 
 	return nil
 }
@@ -111,6 +130,9 @@ func loadConfigFile(v *viper.Viper) error {
 func bindEnvVariables(v *viper.Viper) {
 	v.SetEnvPrefix("NVIDIACTL")
 	v.AutomaticEnv()
+
+	// Replace dots with underscores in env vars
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 }
 
 func createConfig(v *viper.Viper) *Config {
