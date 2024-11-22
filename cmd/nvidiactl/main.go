@@ -45,9 +45,11 @@ type AppState struct {
 }
 
 func main() {
-	// Initialize with minimal logging first
-	logger.Init(false, false, logger.IsService())
-	logger.Debug().Msg("Starting nvidiactl...")
+	// Initialize with default log level
+	logger.Init(config.DefaultLogLevel, logger.IsService())
+	logger.Debug().
+		Str("config_env", os.Getenv("NVIDIACTL_CONFIG")).
+		Msg("Starting nvidiactl...")
 
 	a, err := New()
 	if err != nil {
@@ -60,8 +62,15 @@ func main() {
 		return
 	}
 
-	// Re-initialize logger with proper config settings
-	logger.Init(a.cfg.Debug, a.cfg.Verbose, logger.IsService())
+	// Re-initialize logger with config settings (only if they differ from default)
+	if a.cfg.LogLevel != config.DefaultLogLevel {
+		logger.Init(a.cfg.LogLevel, logger.IsService())
+	}
+	logger.Info().
+		Str("log_level", a.cfg.LogLevel).
+		Bool("monitor_mode", a.cfg.Monitor).
+		Bool("performance_mode", a.cfg.Performance).
+		Msg("Configuration loaded and applied")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -113,8 +122,7 @@ func New() (*AppState, error) {
 		return nil, errors.Wrap(errors.ErrInitApp, err)
 	}
 
-	logger.Init(cfg.Debug, cfg.Verbose, logger.IsService())
-	logger.Debug().Msg("Config loaded")
+	logger.Init(cfg.LogLevel, logger.IsService())
 
 	gpuDevice, err := gpu.New()
 	if err != nil {
@@ -319,7 +327,7 @@ func (a *AppState) setGPUState(state *GPUState) (GPUState, error) {
 }
 
 func (a *AppState) logGPUState(ctx context.Context, state GPUState) {
-	if a.cfg.Debug {
+	if a.cfg.LogLevel == "debug" {
 		lastFanSpeeds := a.gpuDevice.GetLastFanSpeeds()
 		powerLimits := a.gpuDevice.GetPowerLimits()
 
@@ -351,8 +359,8 @@ func (a *AppState) logGPUState(ctx context.Context, state GPUState) {
 			Bool("performance", a.cfg.Performance).
 			Bool("auto_fan_control", a.autoFanControl).
 			Msg("")
-	} else if a.cfg.Verbose {
-		// Also update verbose logging
+	} else if a.cfg.LogLevel == "info" {
+		// Info level logging...
 		targetFanSpeed := state.TargetFanSpeed
 		if a.autoFanControl {
 			targetFanSpeed = 0

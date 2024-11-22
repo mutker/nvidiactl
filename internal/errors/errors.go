@@ -38,6 +38,9 @@ const (
 	ErrReadConfig      ErrorCode = "read_config_failed"
 	ErrInvalidInterval ErrorCode = "invalid_interval"
 
+	// Logging errors
+	ErrInvalidLogLevel ErrorCode = "invalid_log_level"
+
 	// Initialization errors
 	ErrInitFailed     ErrorCode = "initialization_failed"
 	ErrShutdownFailed ErrorCode = "shutdown_failed"

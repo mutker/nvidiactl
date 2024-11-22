@@ -13,6 +13,13 @@ var log zerolog.Logger
 
 type LogLevel int8
 
+var logLevelMap = map[string]LogLevel{
+	"debug":   DebugLevel,
+	"info":    InfoLevel,
+	"warning": WarnLevel,
+	"error":   ErrorLevel,
+}
+
 const (
 	DebugLevel LogLevel = iota
 	InfoLevel
@@ -34,7 +41,7 @@ func (e *LogEvent) Send() {
 }
 
 // Init initializes the logger based on the given configuration
-func Init(debug, verbose, isService bool) {
+func Init(logLevel string, isService bool) {
 	output := zerolog.ConsoleWriter{
 		Out:        os.Stdout,
 		TimeFormat: time.RFC3339,
@@ -49,12 +56,11 @@ func Init(debug, verbose, isService bool) {
 
 	log = zerolog.New(output).With().Timestamp().Logger()
 
-	SetLogLevel(WarnLevel) // Default log level
-
-	if debug {
-		SetLogLevel(DebugLevel)
-	} else if verbose {
-		SetLogLevel(InfoLevel)
+	// Set log level from string
+	if level, ok := logLevelMap[logLevel]; ok {
+		SetLogLevel(level)
+	} else {
+		SetLogLevel(WarnLevel) // Fallback to warning if invalid
 	}
 }
 

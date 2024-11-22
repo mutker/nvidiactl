@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/viper"
 )
 
+const DefaultLogLevel = "info"
+
 type Config struct {
 	Interval    int    `mapstructure:"interval"`
 	Temperature int    `mapstructure:"temperature"`
@@ -16,38 +18,40 @@ type Config struct {
 	Hysteresis  int    `mapstructure:"hysteresis"`
 	Performance bool   `mapstructure:"performance"`
 	Monitor     bool   `mapstructure:"monitor"`
-	Debug       bool   `mapstructure:"debug"`
-	Verbose     bool   `mapstructure:"verbose"`
+	LogLevel    string `mapstructure:"log_level"`
 	Telemetry   bool   `mapstructure:"telemetry"`
 	TelemetryDB string `mapstructure:"database"`
 }
 
 func Load() (*Config, error) {
 	v := viper.New()
+
+	// Set defaults first
 	setDefaults(v)
+
+	// Define and parse flags
 	defineFlags(v)
 
+	// Bind flags to viper BEFORE loading config file
 	if err := bindFlags(v); err != nil {
 		return nil, err
 	}
 
+	// Load config file
 	if err := loadConfigFile(v); err != nil {
 		return nil, err
 	}
 
+	// Environment variables last
 	bindEnvVariables(v)
 
+	// Create config from final values
 	cfg := createConfig(v)
-
-	if cfg.Monitor && !cfg.Debug {
-		cfg.Verbose = true
-	}
+	setLogLevel(cfg)
 
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
-
-	setLogLevel(cfg)
 
 	return cfg, nil
 }
@@ -59,8 +63,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("hysteresis", 4)
 	v.SetDefault("performance", false)
 	v.SetDefault("monitor", false)
-	v.SetDefault("debug", false)
-	v.SetDefault("verbose", false)
+	v.SetDefault("log_level", DefaultLogLevel)
 	v.SetDefault("telemetry", false)
 	v.SetDefault("database", "/var/lib/nvidiactl/telemetry.db")
 
@@ -69,23 +72,24 @@ func setDefaults(v *viper.Viper) {
 	// v.RegisterAlias("fan-speed", "fanspeed")
 }
 
-func defineFlags(v *viper.Viper) {
-	pflag.Bool("debug", v.GetBool("debug"), "Enable debugging mode")
-	pflag.Bool("verbose", v.GetBool("verbose"), "Enable verbose logging")
-	pflag.Int("interval", v.GetInt("interval"), "Interval between updates (in seconds)")
-	pflag.Int("temperature", v.GetInt("temperature"), "Maximum allowed temperature (in Celsius)")
-	pflag.Int("fanspeed", v.GetInt("fanspeed"), "Maximum allowed fan speed (in percent)")
-	pflag.Int("hysteresis", v.GetInt("hysteresis"), "Temperature change required before adjusting fan speed")
-	pflag.Bool("performance", v.GetBool("performance"), "Enable performance mode (disable power limit adjustments)")
-	pflag.Bool("monitor", v.GetBool("monitor"), "Enable monitor mode (only log, don't change settings)")
-	pflag.Bool("telemetry", v.GetBool("telemetry"), "Enable telemetry collection")
-	pflag.String("database", v.GetString("database"), "Path to the telemetry database file")
-	pflag.Parse()
-}
-
 func bindFlags(v *viper.Viper) error {
-	if err := v.BindPFlags(pflag.CommandLine); err != nil {
-		return errors.Wrap(errors.ErrBindFlags, err)
+	flags := map[string]string{
+		"config":      "config",
+		"log_level":   "log-level",
+		"interval":    "interval",
+		"temperature": "temperature",
+		"fanspeed":    "fanspeed",
+		"hysteresis":  "hysteresis",
+		"performance": "performance",
+		"monitor":     "monitor",
+		"telemetry":   "telemetry",
+		"database":    "database",
+	}
+
+	for configKey, flagName := range flags {
+		if err := v.BindPFlag(configKey, pflag.Lookup(flagName)); err != nil {
+			return errors.Wrap(errors.ErrBindFlags, err)
+		}
 	}
 
 	return nil
@@ -103,14 +107,21 @@ func loadConfigFile(v *viper.Viper) error {
 		v.SetConfigFile(configFile)
 	}
 
+	// Check explicit config file from flag/env
+	configFile = v.GetString("config")
+	if configFile != "" {
+		logger.Debug().Str("configFile", configFile).Msg("Using explicit config file path")
+		v.SetConfigFile(configFile)
+	}
+
+	// Try to read config
 	err := v.ReadInConfig()
 	if err != nil {
 		var configFileNotFound viper.ConfigFileNotFoundError
 		if errors.As(err, &configFileNotFound) {
-			logger.Info().Msg("No config file found. Using defaults and flags.")
+			logger.Debug().Msg("No config file found. Using defaults and flags.")
 			return nil
 		}
-		// For any other error, log more details
 		logger.Debug().
 			Err(err).
 			Str("configFile", configFile).
@@ -120,9 +131,13 @@ func loadConfigFile(v *viper.Viper) error {
 		return errors.Wrap(errors.ErrReadConfig, err)
 	}
 
-	logger.Info().
-		Str("file", v.ConfigFileUsed()).
-		Msg("Config file loaded successfully")
+	logger.Debug(). // Changed from Info to Debug
+			Str("file", v.ConfigFileUsed()).
+			Msg("Config file loaded") // Removed "successfully" for consistency
+
+	logger.Debug().
+		Interface("config", v.AllSettings()).
+		Msg("Loaded config values")
 
 	return nil
 }
@@ -143,11 +158,27 @@ func createConfig(v *viper.Viper) *Config {
 		Hysteresis:  v.GetInt("hysteresis"),
 		Performance: v.GetBool("performance"),
 		Monitor:     v.GetBool("monitor"),
-		Debug:       v.GetBool("debug"),
-		Verbose:     v.GetBool("verbose"),
+		LogLevel:    v.GetString("log_level"),
 		Telemetry:   v.GetBool("telemetry"),
 		TelemetryDB: v.GetString("database"),
 	}
+}
+
+func defineFlags(v *viper.Viper) {
+	// Define all flags
+	pflag.String("config", "", "Path to config file")
+	pflag.String("log-level", v.GetString("log_level"), "Log level (debug, info, warning, error)")
+	pflag.Int("interval", v.GetInt("interval"), "Interval between updates (in seconds)")
+	pflag.Int("temperature", v.GetInt("temperature"), "Maximum allowed temperature (in Celsius)")
+	pflag.Int("fanspeed", v.GetInt("fanspeed"), "Maximum allowed fan speed (in percent)")
+	pflag.Int("hysteresis", v.GetInt("hysteresis"), "Temperature change required before adjusting fan speed")
+	pflag.Bool("performance", v.GetBool("performance"), "Enable performance mode (disable power limit adjustments)")
+	pflag.Bool("monitor", v.GetBool("monitor"), "Enable monitor mode (only log, don't change settings)")
+	pflag.Bool("telemetry", v.GetBool("telemetry"), "Enable telemetry collection")
+	pflag.String("database", v.GetString("database"), "Path to the telemetry database file")
+
+	// Parse all flags
+	pflag.Parse()
 }
 
 func validateConfig(cfg *Config) error {
@@ -155,16 +186,23 @@ func validateConfig(cfg *Config) error {
 		return errors.WithData(errors.ErrInvalidInterval, cfg.Interval)
 	}
 
+	// Validate log level
+	validLevels := map[string]bool{
+		"debug":   true,
+		"info":    true,
+		"warning": true,
+		"error":   true,
+	}
+	if !validLevels[cfg.LogLevel] {
+		return errors.WithData(errors.ErrInvalidLogLevel, cfg.LogLevel)
+	}
+
 	return nil
 }
 
 func setLogLevel(cfg *Config) {
-	switch {
-	case cfg.Debug:
-		logger.SetLogLevel(logger.DebugLevel)
-	case cfg.Verbose:
-		logger.SetLogLevel(logger.InfoLevel)
-	default:
-		logger.SetLogLevel(logger.WarnLevel)
+	// If monitor mode is enabled, ensure minimum info level logging
+	if cfg.Monitor && cfg.LogLevel == "warning" {
+		cfg.LogLevel = "info"
 	}
 }
