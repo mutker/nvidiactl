@@ -123,7 +123,6 @@ func (c *controller) GetTemperature() (Temperature, error) {
 	}
 
 	temperature := Temperature(temp)
-	logger.Debug().Int("temperature", int(temperature)).Msg("Temperature read successful")
 
 	return temperature, nil
 }
@@ -163,8 +162,7 @@ func (c *controller) UpdateTemperatureHistory(temp Temperature) Temperature {
 	avg := sum / Temperature(len(c.tempHistory))
 
 	logger.Debug().
-		Int("historySize", len(c.tempHistory)).
-		Int("average", int(avg)).
+		Int("avgTemperature", int(avg)).
 		Msg("Temperature history updated")
 
 	return avg

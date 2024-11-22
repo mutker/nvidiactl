@@ -175,7 +175,6 @@ func (fc *fanController) GetCurrentSpeeds() []FanSpeed {
 	fc.mu.RLock()
 	defer fc.mu.RUnlock()
 
-	logger.Debug().Msg("Getting current fan speeds from controller")
 	speeds := make([]FanSpeed, len(fc.speeds))
 	copy(speeds, fc.speeds)
 
@@ -189,7 +188,7 @@ func (fc *fanController) GetCurrentSpeeds() []FanSpeed {
 		speeds[i] = FanSpeed(speed)
 	}
 
-	logger.Debug().Interface("speeds", speeds).Msg("Current fan speeds retrieved")
+	logger.Debug().Interface("fanSpeeds", speeds).Msg("Current fan speeds retrieved")
 
 	return speeds
 }

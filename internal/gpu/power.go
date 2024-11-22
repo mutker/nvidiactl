@@ -111,7 +111,6 @@ func (pc *powerController) GetCurrentLimit() PowerLimit {
 	pc.mu.RLock()
 	defer pc.mu.RUnlock()
 
-	logger.Debug().Msg("Getting current power limit from controller")
 	limit, ret := pc.device.GetPowerManagementLimit()
 	if ret != nvml.SUCCESS {
 		logger.Debug().Msgf("Failed to get power limit: %s", nvml.ErrorString(ret))

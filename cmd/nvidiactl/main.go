@@ -45,7 +45,8 @@ type AppState struct {
 }
 
 func main() {
-	logger.Init(true, true, logger.IsService())
+	// Initialize with minimal logging first
+	logger.Init(false, false, logger.IsService())
 	logger.Debug().Msg("Starting nvidiactl...")
 
 	a, err := New()
@@ -58,6 +59,9 @@ func main() {
 		os.Exit(1)
 		return
 	}
+
+	// Re-initialize logger with proper config settings
+	logger.Init(a.cfg.Debug, a.cfg.Verbose, logger.IsService())
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -168,7 +172,7 @@ func (a *AppState) loop(ctx context.Context) error {
 			logger.Debug().Msg("Context canceled, exiting loop")
 			return nil
 		case <-ticker.C:
-			logger.Debug().Msg("Tick: updating GPU state")
+			logger.Debug().Msg("Updating GPU state...")
 
 			state, err := a.getGPUState()
 			if err != nil {
@@ -224,7 +228,7 @@ func (a *AppState) cleanup() {
 }
 
 func (a *AppState) getGPUState() (GPUState, error) {
-	logger.Debug().Msg("Getting GPU state")
+	logger.Debug().Msg("Getting GPU state...")
 
 	// Get temperature with timeout
 	tempChan := make(chan gpu.Temperature)
@@ -242,7 +246,7 @@ func (a *AppState) getGPUState() (GPUState, error) {
 	select {
 	case temp := <-tempChan:
 		currentTemperature = temp
-		logger.Debug().Int("temperature", int(currentTemperature)).Msg("Got temperature")
+		logger.Debug().Int("temperature", int(currentTemperature)).Msg("Current temperature retrieved")
 	case err := <-tempErrChan:
 		logger.Debug().Err(err).Msg("Failed to get temperature")
 		return GPUState{}, errors.Wrap(errors.ErrGetGPUState, err)
@@ -258,7 +262,6 @@ func (a *AppState) getGPUState() (GPUState, error) {
 	// Get power limit
 	logger.Debug().Msg("Getting current power limit...")
 	currentPowerLimit := a.gpuDevice.GetCurrentPowerLimit()
-	logger.Debug().Int("powerLimit", int(currentPowerLimit)).Msg("Got power limit")
 
 	// Update histories with timeout
 	historyChan := make(chan struct{})
@@ -266,11 +269,8 @@ func (a *AppState) getGPUState() (GPUState, error) {
 	var avgPowerLimit gpu.PowerLimit
 
 	go func() {
-		logger.Debug().Msg("Updating temperature history...")
 		avgTemp = a.gpuDevice.UpdateTemperatureHistory(currentTemperature)
-		logger.Debug().Int("avgTemp", int(avgTemp)).Msg("Temperature history updated")
 
-		logger.Debug().Msg("Updating power limit history...")
 		avgPowerLimit = a.gpuDevice.UpdatePowerLimitHistory(currentPowerLimit)
 		logger.Debug().Int("avgPowerLimit", int(avgPowerLimit)).Msg("Power limit history updated")
 
@@ -280,9 +280,9 @@ func (a *AppState) getGPUState() (GPUState, error) {
 	select {
 	case <-historyChan:
 		// History updates completed successfully
-		logger.Debug().Msg("History updates completed successfully")
+		logger.Debug().Msg("Power and temperature history updates completed successfully")
 	case <-time.After(operationTimeout):
-		logger.Warn().Msg("History updates timed out")
+		logger.Warn().Msg("Power and temperature history updates timed out")
 		// Use current values as averages if history update times out
 		avgTemp = currentTemperature
 		avgPowerLimit = currentPowerLimit
@@ -295,8 +295,6 @@ func (a *AppState) getGPUState() (GPUState, error) {
 		CurrentPowerLimit:  int(currentPowerLimit),
 		AveragePowerLimit:  int(avgPowerLimit),
 	}
-
-	logger.Debug().Interface("state", state).Msg("GPU state retrieved")
 
 	return state, nil
 }
