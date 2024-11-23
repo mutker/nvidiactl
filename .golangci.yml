@@ -11,12 +11,12 @@ linters:
     - gci # https://github.com/golangci/golangci-lint/issues/1490
     - godot
     - gomnd
-    - interfacebloat # Our domain interface is intentionally comprehensive
+    - interfacebloat # Interfaces reflect complete domain behavior
     - intrange
-    - ireturn # We want to return interfaces in DDD
-    # - nlreturn
-    - varnamelen
-    - wsl
+    - ireturn # Domain interfaces are intentionally returned for DDD
+    - nlreturn # Domain logic often requires complex error handling
+    - varnamelen # Domain type names are self-documenting
+    - wsl # Domain-specific formatting takes precedence
     - zerologlint
 
 linters-settings:
@@ -56,8 +56,6 @@ linters-settings:
     # Minimal complexity of if statements to report.
     # Default: 5
     min-complexity: 10
-  nlreturn:
-    block-size: 10
   nolintlint:
     allow-unused: false # report any unused nolint directives
     require-explanation: true # require an explanation for nolint directives

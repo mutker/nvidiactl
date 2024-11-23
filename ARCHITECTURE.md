@@ -62,11 +62,6 @@ nvidiactl/
 - Domain types and value objects
 - No implementation details
 
-#### repository.go
-- Data access interface
-- Storage implementation
-- Schema management
-
 #### config.go
 - Domain-specific configuration
 - Configuration validation
@@ -76,11 +71,6 @@ nvidiactl/
 - Domain-specific error codes
 - Error constructors
 - Error handling utilities
-
-#### schema.go
-- Data structure definitions
-- Schema initialization
-- Storage format specifications
 
 ### Package Dependencies
 
@@ -181,22 +171,26 @@ type Controller interface {
 ## Error Handling
 
 Error flow should:
-1. Start specific in domains
-2. Add context while bubbling up
-3. Maintain technical details for logging
-4. Present user-friendly messages at top level
+1. Start specific in domains using domain error codes
+2. Use error factory pattern consistently
+3. Add context while bubbling up
+4. Maintain technical details for logging
 
 Example:
 ```go
 // Domain level
-if err := gpu.SetFanSpeed(speed); err != nil {
-    return errors.Wrap(ErrSetFanSpeed, "failed to adjust cooling")
+errFactory := errors.New()
+if err := device.SetFanSpeed(speed); !IsNVMLSuccess(ret) {
+    return errFactory.Wrap(ErrSetFanSpeed, newNVMLError(ret))
 }
 
 // Top level
 if err := controller.AdjustCooling(); err != nil {
-    log.Error().Err(err).Msg("Technical details here")
-    return fmt.Errorf("Failed to optimize GPU performance: %v", err)
+    var domainErr errors.Error
+    if !errors.As(err, &domainErr) {
+        domainErr = errFactory.Wrap(errors.ErrMainLoop, err)
+    }
+    logger.ErrorWithCode(domainErr).Send()
 }
 ```
 

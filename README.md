@@ -106,6 +106,17 @@ go build -v -o nvidiactl ./cmd/nvidiactl
 - Enhance telemetry collection with additional metrics: frequency, memory usage, processes, etc.
 - Add objective-based (perf vs power vs noise) fan and power limit adjustment curves utilizing collected statistics
 
+## Architecture
+
+This project follows Domain-Driven Design principles:
+- Clear domain boundaries (gpu, telemetry)
+- Interface-driven design
+- Rich domain-specific error handling
+- Dependency injection
+- Clear separation of concerns
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed design documentation.
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a pull request or issue.
