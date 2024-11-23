@@ -12,7 +12,7 @@ import (
 	"codeberg.org/mutker/nvidiactl/internal/errors"
 	"codeberg.org/mutker/nvidiactl/internal/gpu"
 	"codeberg.org/mutker/nvidiactl/internal/logger"
-	"codeberg.org/mutker/nvidiactl/internal/telemetry"
+	metrics "codeberg.org/mutker/nvidiactl/internal/metrics"
 )
 
 const (
@@ -41,7 +41,7 @@ type AppState struct {
 	cfg            *config.Config
 	autoFanControl bool
 	gpuDevice      gpu.Controller
-	telemetry      telemetry.Collector
+	metrics        metrics.MetricsCollector
 }
 
 func main() {
@@ -71,6 +71,7 @@ func main() {
 		Str("log_level", a.cfg.LogLevel).
 		Bool("monitor_mode", a.cfg.Monitor).
 		Bool("performance_mode", a.cfg.Performance).
+		Bool("metrics", a.cfg.Metrics).
 		Msg("Configuration loaded and applied")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -136,19 +137,23 @@ func New() (*AppState, error) {
 		return nil, errFactory.Wrap(errors.ErrInitApp, err)
 	}
 
-	var collector telemetry.Collector
-	if cfg.Telemetry {
-		var err error
-		collector, err = telemetry.NewService(telemetry.Config{
-			DBPath: cfg.TelemetryDB,
+	var collector metrics.MetricsCollector
+	if cfg.Metrics {
+		collector, err = metrics.NewService(metrics.Config{
+			DBPath:  cfg.MetricsDB,
+			Enabled: true,
 		})
 		if err != nil {
-			logger.Error().Err(err).Msg("Failed to initialize telemetry")
+			var appErr errors.Error
+			if !errors.As(err, &appErr) {
+				appErr = errFactory.Wrap(errors.ErrInitMetrics, err)
+			}
+			logger.ErrorWithCode(appErr).Msg("Failed to initialize metrics collection")
 			return nil, errFactory.Wrap(errors.ErrInitApp, err)
 		}
-		logger.Debug().Msg("Telemetry collection enabled")
-	} else {
-		logger.Debug().Msg("Telemetry collection disabled")
+		logger.Debug().
+			Str("path", cfg.MetricsDB).
+			Msg("Metrics collection enabled")
 	}
 
 	logger.Debug().Msg("Application initialization completed successfully")
@@ -156,7 +161,7 @@ func New() (*AppState, error) {
 	return &AppState{
 		cfg:       cfg,
 		gpuDevice: gpuDevice,
-		telemetry: collector,
+		metrics:   collector,
 	}, nil
 }
 
@@ -228,9 +233,9 @@ func (a *AppState) cleanup() {
 		}
 	}
 
-	if a.telemetry != nil {
-		if err := a.telemetry.Close(); err != nil {
-			logger.Error().Err(err).Msg("Failed to close telemetry")
+	if a.metrics != nil {
+		if err := a.metrics.Close(); err != nil {
+			logger.Error().Err(err).Msg("Failed to close metrics")
 		}
 	}
 	logger.Info().Msg("Exiting...")
@@ -380,32 +385,32 @@ func (a *AppState) logGPUState(ctx context.Context, state GPUState) {
 			Msg("")
 	}
 
-	// Collect telemetry in database, if enabled
-	if a.cfg.Telemetry && a.telemetry != nil {
-		snapshot := &telemetry.MetricsSnapshot{
+	// Collect metrics in database, if enabled
+	if a.cfg.Metrics && a.metrics != nil {
+		snapshot := &metrics.MetricsSnapshot{
 			Timestamp: time.Now(),
-			FanSpeed: telemetry.FanMetrics{
+			FanSpeed: metrics.FanMetrics{
 				Current: state.CurrentFanSpeed,
 				Target:  state.TargetFanSpeed,
 			},
-			Temperature: telemetry.TempMetrics{
-				Current: float64(state.CurrentTemperature),
-				Average: float64(state.AverageTemperature),
+			Temperature: metrics.TempMetrics{
+				Current: state.CurrentTemperature,
+				Average: state.AverageTemperature,
 			},
-			PowerLimit: telemetry.PowerMetrics{
+			PowerLimit: metrics.PowerMetrics{
 				Current: state.CurrentPowerLimit,
 				Target:  state.TargetPowerLimit,
-				Average: float64(state.AveragePowerLimit),
+				Average: state.AveragePowerLimit,
 			},
-			SystemState: telemetry.StateMetrics{
+			SystemState: metrics.StateMetrics{
 				AutoFanControl:  a.autoFanControl,
 				PerformanceMode: a.cfg.Performance,
 			},
 		}
 
-		if err := a.telemetry.Record(ctx, snapshot); err != nil {
+		if err := a.metrics.Record(ctx, snapshot); err != nil {
 			errFactory := errors.New()
-			logger.ErrorWithCode(errFactory.Wrap(errors.ErrCollectTelemetry, err)).Send()
+			logger.ErrorWithCode(errFactory.Wrap(errors.ErrCollectMetrics, err)).Send()
 		}
 	}
 }

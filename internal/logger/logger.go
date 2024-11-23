@@ -131,3 +131,21 @@ func FatalWithCode(err errors.Error) *LogEvent {
 	}
 	return &LogEvent{event}
 }
+
+func ErrorWithContext(err errors.Error, component, operation string) *LogEvent {
+	event := log.Error().
+		Str("component", component).
+		Str("operation", operation)
+
+	if err != nil {
+		event = event.
+			Str("error_code", string(err.Code())).
+			Str("error_message", err.Error())
+
+		if unwrapped := err.Unwrap(); unwrapped != nil {
+			event = event.AnErr("error", unwrapped)
+		}
+	}
+
+	return &LogEvent{event}
+}

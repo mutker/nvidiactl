@@ -35,14 +35,14 @@ nvidiactl/
 
 ### Package Naming
 
-1. **Domain Packages**: Named after their core domain concept (e.g., gpu, telemetry)
+1. **Domain Packages**: Named after their core domain concept (e.g., gpu, metrics)
 2. **Infrastructure Packages**: Named after their cross-cutting concern (e.g., config, errors, logger)
 3. **Command Packages**: Named after the executable they produce (e.g., nvidiactl)
 
 ### File Naming Conventions
 
 1. **interface.go**: Contains all public interfaces and domain types
-2. **{domain}.go**: Main domain implementation file, named after the package (e.g., telemetry.go, gpu.go)
+2. **{domain}.go**: Main domain implementation file, named after the package (e.g., metrics.go, gpu.go)
 3. **repository.go**: Data access interface and implementation
 4. **config.go**: Domain configuration
 5. **errors.go**: Domain-specific error codes
@@ -51,7 +51,7 @@ nvidiactl/
 
 ### File Responsibilities
 
-#### {domain}.go (e.g., telemetry.go, gpu.go)
+#### {domain}.go (e.g., metrics.go, gpu.go)
 - Primary domain implementation
 - Implements interfaces defined in interface.go
 - Contains core domain logic
@@ -136,7 +136,7 @@ Key principles:
 
 ### Domain Packages
 
-Domain-specific packages (e.g., `internal/gpu`, `internal/telemetry`):
+Domain-specific packages (e.g., `internal/gpu`, `internal/metrics`):
 - Own their domain workflow implementation
 - Define clear public interfaces
 - Maintain internal state and logic
@@ -149,24 +149,42 @@ Key principles:
 - Domain-specific error handling
 - Self-contained business logic
 
-## Interface Design
+#### Schema Management (internal/metrics)
 
-Interfaces should be:
-1. Defined at package boundaries
-2. Focused on behavior, not implementation
-3. Small and cohesive
-4. Consumer-driven
+The metrics package implements a versioned schema approach:
 
-Example:
-```go
-// internal/gpu/interface.go
-type Controller interface {
-    // Methods should describe behavior
-    MonitorTemperature() (<-chan Temperature, error)
-    SetFanSpeed(speed int) error
-    GetCurrentState() (State, error)
-}
-```
+1. **Schema Version Control**:
+   - Schema definition is the single source of truth
+   - Any schema change requires version increment
+   - Version tracking in schema_versions table
+   - Automatic backup before schema changes
+
+2. **Schema Files Organization**:
+   ```
+   metrics/
+   ├── schema.go      # Schema definition, version, and SQL
+   └── migration.go   # Version check and backup handling
+   ```
+
+3. **Version Management Flow**:
+   - Check current schema version on startup
+   - If version mismatch:
+     1. Create timestamped backup
+     2. Drop existing tables
+     3. Create new schema with new version
+     4. Log backup location for reference
+
+4. **Backup Strategy**:
+   - Backups stored in `/var/lib/nvidiactl/backups`
+   - Naming: `metrics_v{version}_{timestamp}.db`
+   - Uses SQLite VACUUM for safe backup
+   - Filesystem-based backup management
+
+5. **Schema Safety Principles**:
+   - Schema changes require version increment
+   - Automatic backup before changes
+   - Clean separation of versioning and data
+   - Safe initialization and cleanup
 
 ## Error Handling
 
@@ -176,6 +194,29 @@ Error flow should:
 3. Add context while bubbling up
 4. Maintain technical details for logging
 
+### Error Code Hierarchy
+
+1. **Common Infrastructure Errors**:
+   - Defined in central errors package
+   - Represent cross-cutting concerns
+   - Used for truly common scenarios (e.g., initialization, timeouts)
+   - Example: `ErrTimeout`, `ErrInitFailed`, `ErrInvalidConfig`
+
+2. **Domain-Specific Errors**:
+   - Defined within domain packages
+   - Represent domain-specific failures
+   - May use common errors where appropriate
+   - Should maintain clear domain context
+   - Example: `metrics.ErrSchemaValidationFailed`, `gpu.ErrFanControlFailed`
+
+### Error Context
+
+Errors should carry appropriate context using the error factory methods:
+1. `New`: Create new domain error
+2. `Wrap`: Wrap underlying error with domain context
+3. `WithMessage`: Add descriptive message
+4. `WithData`: Attach structured data
+
 Example:
 ```go
 // Domain level
@@ -184,7 +225,19 @@ if err := device.SetFanSpeed(speed); !IsNVMLSuccess(ret) {
     return errFactory.Wrap(ErrSetFanSpeed, newNVMLError(ret))
 }
 
-// Top level
+// With structured data
+return errFactory.WithData(ErrSchemaValidationFailed,
+    struct {
+        Table  string
+        Column string
+        Error  string
+    }{
+        Table:  "metrics",
+        Column: "timestamp",
+        Error:  "type mismatch",
+    })
+
+// Top level error handling
 if err := controller.AdjustCooling(); err != nil {
     var domainErr errors.Error
     if !errors.As(err, &domainErr) {
@@ -193,6 +246,28 @@ if err := controller.AdjustCooling(); err != nil {
     logger.ErrorWithCode(domainErr).Send()
 }
 ```
+
+### Error Design Principles
+
+1. **Domain Separation**:
+   - Each domain owns its error definitions
+   - Domains may use common errors where appropriate
+   - Error context remains domain-specific
+
+2. **Error Factory Pattern**:
+   - Consistent error creation through factory
+   - Rich error context and metadata
+   - Type-safe error handling
+
+3. **Error Flow**:
+   - Technical details captured at source
+   - Context added while bubbling up
+   - User-friendly messages at top level
+
+4. **Error Context**:
+   - Structured data over string formatting
+   - Clear error hierarchies
+   - Rich debugging information
 
 ## Dependencies
 
@@ -207,14 +282,14 @@ Example:
 type GPUController struct {
     device    DeviceController
     monitor   TempMonitor
-    telemetry TelemetryCollector
+    metrics MetricsCollector
 }
 
 func NewGPUController(deps Dependencies) *GPUController {
     return &GPUController{
         device:    deps.Device,
         monitor:   deps.Monitor,
-        telemetry: deps.Telemetry,
+        metrics: deps.Metrics,
     }
 }
 ```

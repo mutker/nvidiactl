@@ -17,7 +17,7 @@ nvidiactl is a command-line tool providing automatic fan speed management and dy
 - 🔧 **Direct GPU interaction** using NVML (NVIDIA Management Library)
 - 🖥️ **Standalone application** or systemd service functionality
 - 🔍 **Debug mode** for detailed logging and troubleshooting
-- 📈 **Telemetry collection** in local database for advanced statistics
+- 📈 **Metrics collection** in local database for advanced statistics
 
 ## Installation
 
@@ -79,16 +79,16 @@ monitor = false
 # Log level: debug, info, warning, error (string, default: "info")
 log_level = "info"
 
-# Enable telemetry collection (boolean, default: false)
-telemetry = false
+# Enable metrics collection (boolean, default: false)
+metrics = false
 
-# Path to the telemetry database file (string, default: "/var/lib/nvidiactl/telemetry.db")
-database = "/var/lib/nvidiactl/telemetry.db"
+# Path to the metrics database file (string, default: "/var/lib/nvidiactl/metrics.db")
+database = "/var/lib/nvidiactl/metrics.db"
 ```
 
 ## Usage
 
-Simply call `nvidiactl` after configuring `/etc/nvidiactl.conf`, or via the command-line, e.g. `nvidiactl --temperature=85 --fanspeed=80 --performance`. Optional telemetry collection in a local SQLite3 database (default: `/var/lib/nvidiactl/telemetry.db`) can be enabled with `--telemetry`.
+Simply call `nvidiactl` after configuring `/etc/nvidiactl.conf`, or via the command-line, e.g. `nvidiactl --temperature=85 --fanspeed=80 --performance`. Optional metrics collection in a local SQLite3 database (default: `/var/lib/nvidiactl/metrics.db`) can be enabled with `--metrics`.
 
 Enable monitoring mode ("dry run", only prints statistics with no changes to fan speeds or power limits): `nvidiactl --monitor`
 
@@ -103,13 +103,13 @@ go build -v -o nvidiactl ./cmd/nvidiactl
 ## Roadmap
 
 - Add presets for fan and power limit adjustment curves that can be applied during runtime
-- Enhance telemetry collection with additional metrics: frequency, memory usage, processes, etc.
+- Enhance metrics collection with additional metrics: frequency, memory usage, processes, etc.
 - Add objective-based (perf vs power vs noise) fan and power limit adjustment curves utilizing collected statistics
 
 ## Architecture
 
 This project follows Domain-Driven Design principles:
-- Clear domain boundaries (gpu, telemetry)
+- Clear domain boundaries (gpu, metrics)
 - Interface-driven design
 - Rich domain-specific error handling
 - Dependency injection

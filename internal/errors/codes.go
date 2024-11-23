@@ -41,10 +41,10 @@ const (
 	ErrTimeout          ErrorCode = "operation_timeout"
 	ErrInvalidOperation ErrorCode = "invalid_operation"
 
-	// Telemetry errors
-	ErrInitTelemetry    ErrorCode = "init_telemetry_failed"
-	ErrCollectTelemetry ErrorCode = "collect_telemetry_failed"
-	ErrCloseTelemetry   ErrorCode = "close_telemetry_failed"
+	// Metrics errors
+	ErrInitMetrics    ErrorCode = "init_metrics_failed"
+	ErrCollectMetrics ErrorCode = "collect_metrics_failed"
+	ErrCloseMetrics   ErrorCode = "close_metrics_failed"
 )
 
 // Common error messages
@@ -66,9 +66,9 @@ var errorMessages = map[ErrorCode]string{
 	ErrTimeout:           "Operation timed out",
 	ErrInvalidOperation:  "Invalid operation",
 	ErrInvalidInterval:   "Invalid interval value",
-	ErrInitTelemetry:     "Failed to initialize telemetry",
-	ErrCollectTelemetry:  "Failed to collect telemetry data",
-	ErrCloseTelemetry:    "Failed to close telemetry connection",
+	ErrInitMetrics:       "Failed to initialize metrics",
+	ErrCollectMetrics:    "Failed to collect metrics data",
+	ErrCloseMetrics:      "Failed to close metrics connection",
 	ErrInitApp:           "Failed to initialize application",
 	ErrMainLoop:          "Error in main loop",
 	ErrGetGPUState:       "Failed to get GPU state",

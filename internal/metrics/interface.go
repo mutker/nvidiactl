@@ -1,18 +1,18 @@
-package telemetry
+package metrics
 
 import (
 	"context"
 	"time"
 )
 
-// Collector defines the core domain interface
-type Collector interface {
+// MetricsCollector defines the core domain interface
+type MetricsCollector interface {
 	Record(ctx context.Context, snapshot *MetricsSnapshot) error
 	Close() error
 }
 
-// Repository defines the interface for telemetry data storage
-type Repository interface {
+// Repository defines the interface for metrics data storage
+type MetricsRepository interface {
 	Record(snapshot *MetricsSnapshot) error
 	Close() error
 }
@@ -33,14 +33,14 @@ type FanMetrics struct {
 }
 
 type TempMetrics struct {
-	Current float64
-	Average float64
+	Current int
+	Average int
 }
 
 type PowerMetrics struct {
 	Current int
 	Target  int
-	Average float64
+	Average int
 }
 
 type StateMetrics struct {

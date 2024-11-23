@@ -7,10 +7,10 @@ import (
 
 const (
 	// Initialization and Lifecycle Errors
-	ErrNotInitialized   = errors.ErrorCode("gpu_not_initialized")
-	ErrInitFailed       = errors.ErrorCode("gpu_init_failed")
-	ErrDeviceNotFound   = errors.ErrorCode("gpu_device_not_found")
-	ErrShutdownFailed   = errors.ErrorCode("gpu_shutdown_failed")
+	ErrNotInitialized   = errors.ErrResourceNotFound
+	ErrInitFailed       = errors.ErrInitFailed
+	ErrDeviceNotFound   = errors.ErrResourceNotFound
+	ErrShutdownFailed   = errors.ErrShutdownFailed
 	ErrDeviceInfoFailed = errors.ErrorCode("gpu_device_info_failed")
 
 	// Temperature Errors

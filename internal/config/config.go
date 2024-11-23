@@ -19,8 +19,8 @@ type Config struct {
 	Performance bool   `mapstructure:"performance"`
 	Monitor     bool   `mapstructure:"monitor"`
 	LogLevel    string `mapstructure:"log_level"`
-	Telemetry   bool   `mapstructure:"telemetry"`
-	TelemetryDB string `mapstructure:"database"`
+	Metrics     bool   `mapstructure:"metrics"`
+	MetricsDB   string `mapstructure:"database"`
 }
 
 func Load() (*Config, error) {
@@ -57,8 +57,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("performance", false)
 	v.SetDefault("monitor", false)
 	v.SetDefault("log_level", DefaultLogLevel)
-	v.SetDefault("telemetry", false)
-	v.SetDefault("database", "/var/lib/nvidiactl/telemetry.db")
+	v.SetDefault("metrics", false)
+	v.SetDefault("database", "/var/lib/nvidiactl/metrics.db")
 
 	// Register all config keys that might be in the config file
 	// v.RegisterAlias("fan_speed", "fanspeed")
@@ -76,7 +76,7 @@ func bindFlags(v *viper.Viper) error {
 		"hysteresis":  "hysteresis",
 		"performance": "performance",
 		"monitor":     "monitor",
-		"telemetry":   "telemetry",
+		"metrics":     "metrics",
 		"database":    "database",
 	}
 
@@ -154,8 +154,8 @@ func createConfig(v *viper.Viper) *Config {
 		Performance: v.GetBool("performance"),
 		Monitor:     v.GetBool("monitor"),
 		LogLevel:    v.GetString("log_level"),
-		Telemetry:   v.GetBool("telemetry"),
-		TelemetryDB: v.GetString("database"),
+		Metrics:     v.GetBool("metrics"),
+		MetricsDB:   v.GetString("database"),
 	}
 }
 
@@ -169,8 +169,8 @@ func defineFlags(v *viper.Viper) {
 	pflag.Int("hysteresis", v.GetInt("hysteresis"), "Temperature change required before adjusting fan speed")
 	pflag.Bool("performance", v.GetBool("performance"), "Enable performance mode (disable power limit adjustments)")
 	pflag.Bool("monitor", v.GetBool("monitor"), "Enable monitor mode (only log, don't change settings)")
-	pflag.Bool("telemetry", v.GetBool("telemetry"), "Enable telemetry collection")
-	pflag.String("database", v.GetString("database"), "Path to the telemetry database file")
+	pflag.Bool("metrics", v.GetBool("metrics"), "Enable metrics collection")
+	pflag.String("database", v.GetString("database"), "Path to the metrics database file")
 
 	// Parse all flags
 	pflag.Parse()
