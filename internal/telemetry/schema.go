@@ -7,22 +7,25 @@ import (
 )
 
 func initSchema(db *sql.DB) error {
+	errFactory := errors.New()
+
 	_, err := db.Exec(`
-        CREATE TABLE IF NOT EXISTS telemetry (
-            timestamp INTEGER PRIMARY KEY,
-            fan_speed INTEGER,
-            target_fan_speed INTEGER,
-            temperature INTEGER,
-            average_temperature INTEGER,
-            power_limit INTEGER,
-            target_power_limit INTEGER,
-            average_power_limit INTEGER,
-            auto_fan_control INTEGER,
-            performance_mode INTEGER
+        CREATE TABLE IF NOT EXISTS metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            fan_speed_current INTEGER NOT NULL,
+            fan_speed_target INTEGER NOT NULL,
+            temp_current REAL NOT NULL,
+            temp_average REAL NOT NULL,
+            power_current INTEGER NOT NULL,
+            power_target INTEGER NOT NULL,
+            power_average REAL NOT NULL,
+            auto_fan_control INTEGER NOT NULL,
+            performance_mode INTEGER NOT NULL
         )
     `)
 	if err != nil {
-		return errors.Wrap(ErrSchemaInitFailed, err)
+		return errFactory.Wrap(ErrSchemaInitFailed, err)
 	}
 
 	return nil

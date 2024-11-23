@@ -24,21 +24,20 @@ type powerController struct {
 }
 
 func newPowerController(device nvml.Device) (PowerController, error) {
+	errFactory := errors.New()
 	pc := &powerController{
 		device:       device,
 		powerHistory: make([]PowerLimit, 0, powerLimitWindowSize),
 	}
 
-	// Get power management limits
 	minLimit, maxLimit, ret := device.GetPowerManagementLimitConstraints()
-	if ret != nvml.SUCCESS {
-		return nil, errors.Wrap(ErrPowerLimitsFailed, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		return nil, errFactory.Wrap(ErrPowerLimitsFailed, newNVMLError(ret))
 	}
 
-	// Get default power limit
 	defaultLimit, ret := device.GetPowerManagementDefaultLimit()
-	if ret != nvml.SUCCESS {
-		return nil, errors.Wrap(ErrPowerLimitsFailed, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		return nil, errFactory.Wrap(ErrPowerLimitsFailed, newNVMLError(ret))
 	}
 
 	pc.limits = PowerLimits{
@@ -47,10 +46,9 @@ func newPowerController(device nvml.Device) (PowerController, error) {
 		Default: PowerLimit(defaultLimit / milliWattsToWatts),
 	}
 
-	// Get current power limit
 	currentLimit, ret := device.GetPowerManagementLimit()
-	if ret != nvml.SUCCESS {
-		return nil, errors.Wrap(ErrPowerLimitFailed, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		return nil, errFactory.Wrap(ErrPowerLimitFailed, newNVMLError(ret))
 	}
 
 	pc.currentLimit = PowerLimit(currentLimit / milliWattsToWatts)
@@ -61,32 +59,31 @@ func newPowerController(device nvml.Device) (PowerController, error) {
 }
 
 func (pc *powerController) GetLimit() (PowerLimit, error) {
+	errFactory := errors.New()
 	pc.mu.RLock()
 	defer pc.mu.RUnlock()
 
 	limit, ret := pc.device.GetPowerManagementLimit()
-	if ret != nvml.SUCCESS {
-		return 0, errors.Wrap(ErrPowerLimitFailed, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		return 0, errFactory.Wrap(ErrPowerLimitFailed, newNVMLError(ret))
 	}
 
 	return PowerLimit(limit / milliWattsToWatts), nil
 }
 
 func (pc *powerController) SetLimit(limit PowerLimit) error {
+	errFactory := errors.New()
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
 
-	// Validate limit is within bounds
 	if limit < pc.limits.Min || limit > pc.limits.Max {
-		return errors.WithData(errors.ErrInvalidArgument, "power limit out of range")
+		return errFactory.WithData(errors.ErrInvalidArgument, "power limit out of range")
 	}
 
-	// Convert watts to milliwatts for NVML
 	limitInMilliWatts := wattsToMilliWatts(limit)
-
 	ret := pc.device.SetPowerManagementLimit(limitInMilliWatts)
-	if ret != nvml.SUCCESS {
-		return errors.Wrap(ErrPowerLimitFailed, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		return errFactory.Wrap(ErrSetPowerLimit, newNVMLError(ret))
 	}
 
 	pc.lastLimit = pc.currentLimit
@@ -112,7 +109,7 @@ func (pc *powerController) GetCurrentLimit() PowerLimit {
 	defer pc.mu.RUnlock()
 
 	limit, ret := pc.device.GetPowerManagementLimit()
-	if ret != nvml.SUCCESS {
+	if !IsNVMLSuccess(ret) {
 		logger.Debug().Msgf("Failed to get power limit: %s", nvml.ErrorString(ret))
 		return pc.currentLimit
 	}
@@ -131,13 +128,11 @@ func (pc *powerController) UpdateHistory(limit PowerLimit) PowerLimit {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
 
-	// Store the limit in history
 	pc.powerHistory = append(pc.powerHistory, limit)
 	if len(pc.powerHistory) > powerLimitWindowSize {
 		pc.powerHistory = pc.powerHistory[1:]
 	}
 
-	// Calculate average
 	var sum PowerLimit
 	for _, l := range pc.powerHistory {
 		sum += l

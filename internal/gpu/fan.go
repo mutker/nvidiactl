@@ -19,46 +19,41 @@ type fanController struct {
 }
 
 func newFanController(device nvml.Device) (FanController, error) {
+	errFactory := errors.New()
 	fc := &fanController{
 		device:   device,
-		autoMode: true, // Assume auto mode by default
+		autoMode: true,
 	}
 
-	// Get fan count
 	count, ret := device.GetNumFans()
-	if ret != nvml.SUCCESS {
-		return nil, errors.Wrap(ErrFanCountFailed, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		return nil, errFactory.Wrap(ErrFanCountFailed, newNVMLError(ret))
 	}
 	fc.count = count
 
-	// Initialize speed slices
 	fc.speeds = make([]FanSpeed, fc.count)
 	fc.lastSpeeds = make([]FanSpeed, fc.count)
 
-	// Get fan speed limits
 	minSpeed, maxSpeed, ret := device.GetMinMaxFanSpeed()
-	if ret != nvml.SUCCESS {
-		return nil, errors.Wrap(ErrGetFanLimitsFailed, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		return nil, errFactory.Wrap(ErrGetFanLimitsFailed, newNVMLError(ret))
 	}
 
 	fc.limits = FanSpeedLimits{
-		Min: FanSpeed(minSpeed),
-		Max: FanSpeed(maxSpeed),
-		// For default, we'll use the current speed as it represents the GPU's preferred speed
-		Default: FanSpeed(minSpeed), // Will be updated below
+		Min:     FanSpeed(minSpeed),
+		Max:     FanSpeed(maxSpeed),
+		Default: FanSpeed(minSpeed),
 	}
 
-	// Get current speeds to initialize state
 	for i := 0; i < fc.count; i++ {
 		speed, ret := device.GetFanSpeed_v2(i)
-		if ret != nvml.SUCCESS {
-			return nil, errors.Wrap(ErrGetFanSpeedFailed, nvml.ErrorString(ret))
+		if !IsNVMLSuccess(ret) {
+			return nil, errFactory.Wrap(ErrGetFanSpeedFailed, newNVMLError(ret))
 		}
 		fc.speeds[i] = FanSpeed(speed)
 		fc.lastSpeeds[i] = FanSpeed(speed)
 	}
 
-	// Use the first fan's current speed as the default
 	if fc.count > 0 {
 		fc.limits.Default = fc.speeds[0]
 	}
@@ -67,37 +62,36 @@ func newFanController(device nvml.Device) (FanController, error) {
 }
 
 func (fc *fanController) GetSpeed(fanIndex int) (FanSpeed, error) {
+	errFactory := errors.New()
 	fc.mu.RLock()
 	defer fc.mu.RUnlock()
 
 	if fanIndex < 0 || fanIndex >= fc.count {
-		return 0, errors.WithData(errors.ErrInvalidArgument, "fan index out of range")
+		return 0, errFactory.WithData(errors.ErrInvalidArgument, "fan index out of range")
 	}
 
 	speed, ret := fc.device.GetFanSpeed_v2(fanIndex)
-	if ret != nvml.SUCCESS {
-		return 0, errors.Wrap(ErrGetFanSpeedFailed, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		return 0, errFactory.Wrap(ErrGetFanSpeedFailed, newNVMLError(ret))
 	}
 
 	return FanSpeed(speed), nil
 }
 
 func (fc *fanController) SetSpeed(speed FanSpeed) error {
+	errFactory := errors.New()
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
-	// Validate speed is within limits
 	if speed < fc.limits.Min || speed > fc.limits.Max {
-		return errors.WithData(errors.ErrInvalidArgument, "fan speed out of range")
+		return errFactory.WithData(errors.ErrInvalidArgument, "fan speed out of range")
 	}
 
-	// Store current speeds as last speeds
 	copy(fc.lastSpeeds, fc.speeds)
 
-	// Set speed for all fans
 	for i := 0; i < fc.count; i++ {
-		if ret := nvml.DeviceSetFanSpeed_v2(fc.device, i, int(speed)); ret != nvml.SUCCESS {
-			return errors.Wrap(ErrFanControlFailed, nvml.ErrorString(ret))
+		if ret := nvml.DeviceSetFanSpeed_v2(fc.device, i, int(speed)); !IsNVMLSuccess(ret) {
+			return errFactory.Wrap(ErrSetFanSpeed, newNVMLError(ret))
 		}
 		fc.speeds[i] = speed
 	}
@@ -114,16 +108,15 @@ func (fc *fanController) GetSpeedLimits() FanSpeedLimits {
 }
 
 func (fc *fanController) EnableAuto() error {
+	errFactory := errors.New()
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
-	// Store current speeds as last speeds
 	copy(fc.lastSpeeds, fc.speeds)
 
-	// Enable auto mode for all fans
 	for i := 0; i < fc.count; i++ {
-		if ret := nvml.DeviceSetDefaultFanSpeed_v2(fc.device, i); ret != nvml.SUCCESS {
-			return errors.Wrap(ErrFanControlFailed, nvml.ErrorString(ret))
+		if ret := nvml.DeviceSetDefaultFanSpeed_v2(fc.device, i); !IsNVMLSuccess(ret) {
+			return errFactory.Wrap(ErrFanControlFailed, newNVMLError(ret))
 		}
 	}
 
@@ -133,19 +126,18 @@ func (fc *fanController) EnableAuto() error {
 }
 
 func (fc *fanController) DisableAuto() error {
+	errFactory := errors.New()
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
-	// When disabling auto mode, maintain current speeds
 	for i := 0; i < fc.count; i++ {
 		currentSpeed, ret := fc.device.GetFanSpeed_v2(i)
-		if ret != nvml.SUCCESS {
-			return errors.Wrap(ErrGetFanSpeedFailed, nvml.ErrorString(ret))
+		if !IsNVMLSuccess(ret) {
+			return errFactory.Wrap(ErrGetFanSpeedFailed, newNVMLError(ret))
 		}
 
-		// Set the current speed explicitly to disable auto mode
-		if ret := nvml.DeviceSetFanSpeed_v2(fc.device, i, int(currentSpeed)); ret != nvml.SUCCESS {
-			return errors.Wrap(ErrFanControlFailed, nvml.ErrorString(ret))
+		if ret := nvml.DeviceSetFanSpeed_v2(fc.device, i, int(currentSpeed)); !IsNVMLSuccess(ret) {
+			return errFactory.Wrap(ErrFanControlFailed, newNVMLError(ret))
 		}
 
 		fc.speeds[i] = FanSpeed(currentSpeed)

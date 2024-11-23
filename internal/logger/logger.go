@@ -105,22 +105,29 @@ func Error() *LogEvent {
 }
 
 // ErrorWithCode logs an error message with a specific error code
-func ErrorWithCode(err *errors.AppError) *LogEvent {
-	return &LogEvent{log.Error().
-		Str("error_code", string(err.Code)).
-		Str("error_message", err.Error()).
-		AnErr("error", err.Err)}
-}
+func ErrorWithCode(err errors.Error) *LogEvent {
+	event := log.Error()
+	if err != nil {
+		event = event.Str("error_code", string(err.Code())).
+			Str("error_message", err.Error())
 
-// Fatal logs a fatal message and exits the program
-func Fatal() *LogEvent {
-	return &LogEvent{log.Fatal()}
+		if unwrapped := err.Unwrap(); unwrapped != nil {
+			event = event.AnErr("error", unwrapped)
+		}
+	}
+	return &LogEvent{event}
 }
 
 // FatalWithCode logs a fatal message with a specific error code and exits the program
-func FatalWithCode(err *errors.AppError) *LogEvent {
-	return &LogEvent{log.Fatal().
-		Str("error_code", string(err.Code)).
-		Str("error_message", err.Error()).
-		AnErr("error", err.Err)}
+func FatalWithCode(err errors.Error) *LogEvent {
+	event := log.Fatal()
+	if err != nil {
+		event = event.Str("error_code", string(err.Code())).
+			Str("error_message", err.Error())
+
+		if unwrapped := err.Unwrap(); unwrapped != nil {
+			event = event.AnErr("error", unwrapped)
+		}
+	}
+	return &LogEvent{event}
 }

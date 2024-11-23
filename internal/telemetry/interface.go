@@ -11,6 +11,12 @@ type Collector interface {
 	Close() error
 }
 
+// Repository defines the interface for telemetry data storage
+type Repository interface {
+	Record(snapshot *MetricsSnapshot) error
+	Close() error
+}
+
 // MetricsSnapshot represents domain entities
 type MetricsSnapshot struct {
 	Timestamp   time.Time

@@ -24,18 +24,16 @@ type controller struct {
 	mu              sync.RWMutex
 }
 
-// New creates a new GPU controller instance
 func New() (Controller, error) {
 	c := &controller{
 		nvml:        &nvmlWrapper{},
 		tempHistory: make([]Temperature, 0, temperatureWindowSize),
 	}
-
 	return c, nil
 }
 
-// Initialize prepares the GPU controller for operation
 func (c *controller) Initialize() error {
+	errFactory := errors.New()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -46,47 +44,41 @@ func (c *controller) Initialize() error {
 	logger.Debug().Msg("Initializing NVML...")
 	if err := c.nvml.Initialize(); err != nil {
 		logger.Debug().Err(err).Msg("NVML initialization failed")
-		return errors.Wrap(ErrInitFailed, err)
+		return errFactory.Wrap(ErrInitFailed, err)
 	}
-	logger.Debug().Msg("NVML initialized successfully")
 
 	logger.Debug().Msg("Getting GPU device...")
 	device, err := c.nvml.GetDevice(defaultDeviceIndex)
 	if err != nil {
 		logger.Debug().Err(err).Msg("Failed to get GPU device")
-		return errors.Wrap(ErrInitFailed, err)
+		return errFactory.Wrap(ErrDeviceNotFound, err)
 	}
-	logger.Debug().Msg("GPU device acquired")
 	c.device = device
 
-	// Initialize fan controller
 	logger.Debug().Msg("Initializing fan controller...")
 	fanCtrl, err := newFanController(device)
 	if err != nil {
 		logger.Debug().Err(err).Msg("Failed to initialize fan controller")
-		return errors.Wrap(ErrInitFailed, err)
+		return errFactory.Wrap(ErrInitFailed, err)
 	}
-	logger.Debug().Msg("Fan controller initialized")
 	c.fanController = fanCtrl
 
-	// Initialize power controller
 	logger.Debug().Msg("Initializing power controller...")
 	powerCtrl, err := newPowerController(device)
 	if err != nil {
 		logger.Debug().Err(err).Msg("Failed to initialize power controller")
-		return errors.Wrap(ErrInitFailed, err)
+		return errFactory.Wrap(ErrInitFailed, err)
 	}
-	logger.Debug().Msg("Power controller initialized")
 	c.powerController = powerCtrl
 
 	c.initialized = true
-	logger.Debug().Msg("GPU controller initialization complete")
 
 	return nil
 }
 
 // Shutdown performs cleanup of GPU resources
 func (c *controller) Shutdown() error {
+	errFactory := errors.New()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -94,37 +86,34 @@ func (c *controller) Shutdown() error {
 		return nil
 	}
 
-	logger.Debug().Msg("Shutting down GPU controller...")
 	if err := c.nvml.Shutdown(); err != nil {
 		logger.Debug().Err(err).Msg("NVML shutdown failed")
-		return errors.Wrap(ErrShutdownFailed, err)
+		return errFactory.Wrap(ErrShutdownFailed, err)
 	}
 
 	c.initialized = false
-	logger.Debug().Msg("GPU controller shutdown complete")
 
 	return nil
 }
 
 // GetTemperature returns the current GPU temperature
 func (c *controller) GetTemperature() (Temperature, error) {
+	errFactory := errors.New()
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	if !c.initialized {
-		return 0, errors.New(ErrNotInitialized)
+		return 0, errFactory.New(ErrNotInitialized)
 	}
 
-	logger.Debug().Msg("Reading GPU temperature...")
 	temp, ret := c.device.GetTemperature(nvml.TEMPERATURE_GPU)
-	if ret != nvml.SUCCESS {
-		logger.Debug().Str("error", nvml.ErrorString(ret)).Msg("Failed to read temperature")
-		return 0, errors.Wrap(ErrTemperatureReadFailed, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		err := newNVMLError(ret)
+		logger.Debug().Err(err).Msg("Failed to read temperature")
+		return 0, errFactory.Wrap(ErrTemperatureReadFailed, err)
 	}
 
-	temperature := Temperature(temp)
-
-	return temperature, nil
+	return Temperature(temp), nil
 }
 
 // GetAverageTemperature returns the moving average of GPU temperature
@@ -184,11 +173,12 @@ func (c *controller) GetCurrentFanSpeeds() []FanSpeed {
 }
 
 func (c *controller) SetFanSpeed(speed FanSpeed) error {
+	errFactory := errors.New()
 	if c.fanController == nil {
-		return errors.New(ErrNotInitialized)
+		return errFactory.New(ErrNotInitialized)
 	}
 	if err := c.fanController.SetSpeed(speed); err != nil {
-		return errors.Wrap(ErrSetFanSpeed, err)
+		return errFactory.Wrap(ErrSetFanSpeed, err)
 	}
 	return nil
 }
@@ -209,22 +199,24 @@ func (c *controller) GetFanSpeedLimits() FanSpeedLimits {
 
 // EnableAutoFanControl enables automatic fan control
 func (c *controller) EnableAutoFanControl() error {
+	errFactory := errors.New()
 	if !c.initialized {
-		return errors.New(ErrNotInitialized)
+		return errFactory.New(ErrNotInitialized)
 	}
 	if err := c.fanController.EnableAuto(); err != nil {
-		return errors.Wrap(ErrEnableAutoFan, err)
+		return errFactory.Wrap(ErrEnableAutoFan, err)
 	}
 	return nil
 }
 
 // DisableAutoFanControl disables automatic fan control
 func (c *controller) DisableAutoFanControl() error {
+	errFactory := errors.New()
 	if !c.initialized {
-		return errors.New(ErrNotInitialized)
+		return errFactory.New(ErrNotInitialized)
 	}
 	if err := c.fanController.DisableAuto(); err != nil {
-		return errors.Wrap(ErrDisableAutoFan, err)
+		return errFactory.Wrap(ErrDisableAutoFan, err)
 	}
 	return nil
 }
@@ -246,11 +238,12 @@ func (c *controller) GetCurrentPowerLimit() PowerLimit {
 
 // SetPowerLimit sets the power limit
 func (c *controller) SetPowerLimit(limit PowerLimit) error {
+	errFactory := errors.New()
 	if c.powerController == nil {
-		return errors.New(ErrNotInitialized)
+		return errFactory.New(ErrNotInitialized)
 	}
 	if err := c.powerController.SetLimit(limit); err != nil {
-		return errors.Wrap(ErrSetPowerLimit, err)
+		return errFactory.Wrap(ErrSetPowerLimit, err)
 	}
 	return nil
 }
@@ -272,16 +265,17 @@ func (c *controller) UpdatePowerLimitHistory(limit PowerLimit) PowerLimit {
 
 // Name returns the GPU device name
 func (c *controller) Name() (string, error) {
+	errFactory := errors.New()
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	if !c.initialized {
-		return "", errors.New(ErrNotInitialized)
+		return "", errFactory.New(ErrNotInitialized)
 	}
 
 	name, ret := c.device.GetName()
-	if ret != nvml.SUCCESS {
-		return "", errors.Wrap(ErrDeviceInfoFailed, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		return "", errFactory.Wrap(ErrDeviceInfoFailed, newNVMLError(ret))
 	}
 
 	return name, nil
