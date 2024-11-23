@@ -19,13 +19,14 @@ type nvmlWrapper struct {
 }
 
 func (w *nvmlWrapper) Initialize() error {
+	errFactory := errors.New()
 	if w.initialized {
 		return nil
 	}
 
 	ret := nvml.Init()
-	if ret != nvml.SUCCESS {
-		return errors.Wrap(ErrInitFailed, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		return errFactory.Wrap(ErrInitFailed, newNVMLError(ret))
 	}
 
 	w.initialized = true
@@ -34,13 +35,14 @@ func (w *nvmlWrapper) Initialize() error {
 }
 
 func (w *nvmlWrapper) Shutdown() error {
+	errFactory := errors.New()
 	if !w.initialized {
 		return nil
 	}
 
 	ret := nvml.Shutdown()
-	if ret != nvml.SUCCESS {
-		return errors.Wrap(ErrShutdownFailed, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		return errFactory.Wrap(ErrShutdownFailed, newNVMLError(ret))
 	}
 
 	w.initialized = false
@@ -49,39 +51,42 @@ func (w *nvmlWrapper) Shutdown() error {
 }
 
 func (w *nvmlWrapper) GetDeviceCount() (int, error) {
+	errFactory := errors.New()
 	if !w.initialized {
-		return 0, errors.New(ErrNotInitialized)
+		return 0, errFactory.New(ErrNotInitialized)
 	}
 
 	count, ret := nvml.DeviceGetCount()
-	if ret != nvml.SUCCESS {
-		return 0, errors.Wrap(ErrDeviceCountFailed, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		return 0, errFactory.Wrap(ErrDeviceCountFailed, newNVMLError(ret))
 	}
 
 	return count, nil
 }
 
 func (w *nvmlWrapper) GetDevice(index int) (nvml.Device, error) {
+	errFactory := errors.New()
 	if !w.initialized {
-		return nil, errors.New(ErrNotInitialized)
+		return nil, errFactory.New(ErrNotInitialized)
 	}
 
 	device, ret := nvml.DeviceGetHandleByIndex(index)
-	if ret != nvml.SUCCESS {
-		return nil, errors.Wrap(ErrDeviceNotFound, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		return nil, errFactory.Wrap(ErrDeviceNotFound, newNVMLError(ret))
 	}
 
 	return device, nil
 }
 
 func (w *nvmlWrapper) GetDeviceByUUID(uuid string) (nvml.Device, error) {
+	errFactory := errors.New()
 	if !w.initialized {
-		return nil, errors.New(ErrNotInitialized)
+		return nil, errFactory.New(ErrNotInitialized)
 	}
 
 	device, ret := nvml.DeviceGetHandleByUUID(uuid)
-	if ret != nvml.SUCCESS {
-		return nil, errors.Wrap(ErrDeviceNotFound, nvml.ErrorString(ret))
+	if !IsNVMLSuccess(ret) {
+		return nil, errFactory.Wrap(ErrDeviceNotFound, newNVMLError(ret))
 	}
 
 	return device, nil

@@ -26,26 +26,19 @@ type Config struct {
 func Load() (*Config, error) {
 	v := viper.New()
 
-	// Set defaults first
 	setDefaults(v)
-
-	// Define and parse flags
 	defineFlags(v)
 
-	// Bind flags to viper BEFORE loading config file
 	if err := bindFlags(v); err != nil {
 		return nil, err
 	}
 
-	// Load config file
 	if err := loadConfigFile(v); err != nil {
 		return nil, err
 	}
 
-	// Environment variables last
 	bindEnvVariables(v)
 
-	// Create config from final values
 	cfg := createConfig(v)
 	setLogLevel(cfg)
 
@@ -73,6 +66,7 @@ func setDefaults(v *viper.Viper) {
 }
 
 func bindFlags(v *viper.Viper) error {
+	errFactory := errors.New()
 	flags := map[string]string{
 		"config":      "config",
 		"log_level":   "log-level",
@@ -88,7 +82,7 @@ func bindFlags(v *viper.Viper) error {
 
 	for configKey, flagName := range flags {
 		if err := v.BindPFlag(configKey, pflag.Lookup(flagName)); err != nil {
-			return errors.Wrap(errors.ErrBindFlags, err)
+			return errFactory.Wrap(errors.ErrBindFlags, err)
 		}
 	}
 
@@ -96,6 +90,7 @@ func bindFlags(v *viper.Viper) error {
 }
 
 func loadConfigFile(v *viper.Viper) error {
+	errFactory := errors.New()
 	v.SetConfigName("nvidiactl.conf")
 	v.SetConfigType("toml")
 
@@ -128,12 +123,12 @@ func loadConfigFile(v *viper.Viper) error {
 			Str("searchPaths", "/etc,./").
 			Msg("Error reading config file")
 
-		return errors.Wrap(errors.ErrReadConfig, err)
+		return errFactory.Wrap(errors.ErrReadConfig, err)
 	}
 
-	logger.Debug(). // Changed from Info to Debug
-			Str("file", v.ConfigFileUsed()).
-			Msg("Config file loaded") // Removed "successfully" for consistency
+	logger.Debug().
+		Str("file", v.ConfigFileUsed()).
+		Msg("Config file loaded")
 
 	logger.Debug().
 		Interface("config", v.AllSettings()).
@@ -182,11 +177,12 @@ func defineFlags(v *viper.Viper) {
 }
 
 func validateConfig(cfg *Config) error {
+	errFactory := errors.New()
+
 	if cfg.Interval <= 0 {
-		return errors.WithData(errors.ErrInvalidInterval, cfg.Interval)
+		return errFactory.WithData(errors.ErrInvalidInterval, cfg.Interval)
 	}
 
-	// Validate log level
 	validLevels := map[string]bool{
 		"debug":   true,
 		"info":    true,
@@ -194,7 +190,7 @@ func validateConfig(cfg *Config) error {
 		"error":   true,
 	}
 	if !validLevels[cfg.LogLevel] {
-		return errors.WithData(errors.ErrInvalidLogLevel, cfg.LogLevel)
+		return errFactory.WithData(errors.ErrInvalidLogLevel, cfg.LogLevel)
 	}
 
 	return nil

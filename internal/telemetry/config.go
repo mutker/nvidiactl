@@ -1,8 +1,6 @@
 package telemetry
 
-import (
-	"codeberg.org/mutker/nvidiactl/internal/errors"
-)
+import "codeberg.org/mutker/nvidiactl/internal/errors"
 
 const (
 	defaultDirPerm = 0o755
@@ -20,8 +18,9 @@ func DefaultConfig() Config {
 }
 
 func (c Config) Validate() error {
+	errFactory := errors.New()
 	if c.DBPath == "" {
-		return errors.New(ErrInvalidDBPath)
+		return errFactory.New(ErrInvalidDBPath)
 	}
 	return nil
 }

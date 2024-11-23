@@ -51,13 +51,14 @@ func main() {
 		Str("config_env", os.Getenv("NVIDIACTL_CONFIG")).
 		Msg("Starting nvidiactl...")
 
+	errFactory := errors.New()
 	a, err := New()
 	if err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			logger.ErrorWithCode(appErr).Send()
-		} else {
-			logger.ErrorWithCode(errors.Wrap(errors.ErrMainLoop, err)).Send()
+		var domainErr errors.Error
+		if !errors.As(err, &domainErr) {
+			domainErr = errFactory.Wrap(errors.ErrMainLoop, err)
 		}
+		logger.ErrorWithCode(domainErr).Send()
 		os.Exit(1)
 		return
 	}
@@ -101,25 +102,25 @@ func main() {
 		}
 	}()
 
-	// Remove the defer cleanup since we handle it in the shutdown signal handler
 	if err := a.loop(ctx); err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			logger.ErrorWithCode(appErr).Send()
-		} else {
-			logger.ErrorWithCode(errors.Wrap(errors.ErrMainLoop, err)).Send()
+		var domainErr errors.Error
+		if !errors.As(err, &domainErr) {
+			domainErr = errFactory.Wrap(errors.ErrMainLoop, err)
 		}
-		a.cleanup() // Call cleanup before exiting on error
+		logger.ErrorWithCode(domainErr).Send()
+		a.cleanup()
 		os.Exit(1)
 	}
 }
 
 func New() (*AppState, error) {
+	errFactory := errors.New()
 	logger.Debug().Msg("Starting application initialization")
 
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Debug().Err(err).Msg("Failed to load configuration")
-		return nil, errors.Wrap(errors.ErrInitApp, err)
+		return nil, errFactory.Wrap(errors.ErrInitApp, err)
 	}
 
 	logger.Init(cfg.LogLevel, logger.IsService())
@@ -127,12 +128,12 @@ func New() (*AppState, error) {
 	gpuDevice, err := gpu.New()
 	if err != nil {
 		logger.Debug().Err(err).Msg("Failed to create GPU controller")
-		return nil, errors.Wrap(errors.ErrInitApp, err)
+		return nil, errFactory.Wrap(errors.ErrInitApp, err)
 	}
 
 	if err := gpuDevice.Initialize(); err != nil {
 		logger.Debug().Err(err).Msg("Failed to initialize GPU controller")
-		return nil, errors.Wrap(errors.ErrInitApp, err)
+		return nil, errFactory.Wrap(errors.ErrInitApp, err)
 	}
 
 	var collector telemetry.Collector
@@ -143,7 +144,7 @@ func New() (*AppState, error) {
 		})
 		if err != nil {
 			logger.Error().Err(err).Msg("Failed to initialize telemetry")
-			return nil, errors.Wrap(errors.ErrInitApp, err)
+			return nil, errFactory.Wrap(errors.ErrInitApp, err)
 		}
 		logger.Debug().Msg("Telemetry collection enabled")
 	} else {
@@ -160,8 +161,10 @@ func New() (*AppState, error) {
 }
 
 func (a *AppState) loop(ctx context.Context) error {
+	errFactory := errors.New()
+
 	if a.cfg.Interval <= 0 {
-		return errors.New(errors.ErrInvalidInterval)
+		return errFactory.New(errors.ErrInvalidInterval)
 	}
 
 	interval := time.Duration(a.cfg.Interval) * time.Second
@@ -206,27 +209,25 @@ func (a *AppState) loop(ctx context.Context) error {
 }
 
 func (a *AppState) cleanup() {
+	errFactory := errors.New()
 	logger.Debug().Msg("Starting application cleanup...")
 
 	if a.gpuDevice != nil {
-		// First, reset the power limit and fan control while the GPU is still initialized
 		powerLimits := a.gpuDevice.GetPowerLimits()
 		powerLimitToSet := min(powerLimits.Default, powerLimits.Max)
 		if err := a.gpuDevice.SetPowerLimit(powerLimitToSet); err != nil {
-			logger.ErrorWithCode(errors.Wrap(errors.ErrResetPowerLimit, err)).Send()
+			logger.ErrorWithCode(errFactory.Wrap(errors.ErrResetPowerLimit, err)).Send()
 		}
 
 		if err := a.gpuDevice.EnableAutoFanControl(); err != nil {
-			logger.ErrorWithCode(errors.Wrap(errors.ErrEnableAutoFan, err)).Send()
+			logger.ErrorWithCode(errFactory.Wrap(errors.ErrEnableAutoFan, err)).Send()
 		}
 
-		// Then shut down the GPU controller
 		if err := a.gpuDevice.Shutdown(); err != nil {
-			logger.ErrorWithCode(errors.Wrap(errors.ErrShutdownGPU, err)).Send()
+			logger.ErrorWithCode(errFactory.Wrap(errors.ErrShutdownGPU, err)).Send()
 		}
 	}
 
-	// Finally clean up telemetry
 	if a.telemetry != nil {
 		if err := a.telemetry.Close(); err != nil {
 			logger.Error().Err(err).Msg("Failed to close telemetry")
@@ -236,6 +237,7 @@ func (a *AppState) cleanup() {
 }
 
 func (a *AppState) getGPUState() (GPUState, error) {
+	errFactory := errors.New()
 	logger.Debug().Msg("Getting GPU state...")
 
 	// Get temperature with timeout
@@ -257,9 +259,9 @@ func (a *AppState) getGPUState() (GPUState, error) {
 		logger.Debug().Int("temperature", int(currentTemperature)).Msg("Current temperature retrieved")
 	case err := <-tempErrChan:
 		logger.Debug().Err(err).Msg("Failed to get temperature")
-		return GPUState{}, errors.Wrap(errors.ErrGetGPUState, err)
+		return GPUState{}, errFactory.Wrap(errors.ErrGetGPUState, err)
 	case <-time.After(operationTimeout):
-		return GPUState{}, errors.New(errors.ErrGetGPUState)
+		return GPUState{}, errFactory.New(errors.ErrGetGPUState)
 	}
 
 	// Get fan speeds
@@ -308,16 +310,18 @@ func (a *AppState) getGPUState() (GPUState, error) {
 }
 
 func (a *AppState) setGPUState(state *GPUState) (GPUState, error) {
+	errFactory := errors.New()
+
 	targetFanSpeed := a.calculateFanSpeed(state.AverageTemperature, a.cfg.Temperature, a.cfg.FanSpeed)
 	targetPowerLimit := a.calculatePowerLimit(state.CurrentTemperature, a.cfg.Temperature,
 		state.CurrentFanSpeed, a.cfg.FanSpeed, state.CurrentPowerLimit)
 
 	if err := a.handleFanControl(state, targetFanSpeed); err != nil {
-		return *state, errors.Wrap(errors.ErrSetGPUState, err)
+		return *state, errFactory.Wrap(errors.ErrSetGPUState, err)
 	}
 
 	if err := a.handlePowerLimit(state, targetPowerLimit); err != nil {
-		return *state, errors.Wrap(errors.ErrSetGPUState, err)
+		return *state, errFactory.Wrap(errors.ErrSetGPUState, err)
 	}
 
 	state.TargetFanSpeed = targetFanSpeed
@@ -360,7 +364,6 @@ func (a *AppState) logGPUState(ctx context.Context, state GPUState) {
 			Bool("auto_fan_control", a.autoFanControl).
 			Msg("")
 	} else if a.cfg.LogLevel == "info" {
-		// Info level logging...
 		targetFanSpeed := state.TargetFanSpeed
 		if a.autoFanControl {
 			targetFanSpeed = 0
@@ -401,16 +404,19 @@ func (a *AppState) logGPUState(ctx context.Context, state GPUState) {
 		}
 
 		if err := a.telemetry.Record(ctx, snapshot); err != nil {
-			logger.Error().Err(err).Msg("Failed to record telemetry metrics")
+			errFactory := errors.New()
+			logger.ErrorWithCode(errFactory.Wrap(errors.ErrCollectTelemetry, err)).Send()
 		}
 	}
 }
 
 func (a *AppState) handleFanControl(state *GPUState, targetFanSpeed int) error {
+	errFactory := errors.New()
+
 	if state.AverageTemperature <= minTemperature {
 		if !a.autoFanControl {
 			if err := a.gpuDevice.EnableAutoFanControl(); err != nil {
-				return errors.Wrap(errors.ErrEnableAutoFan, err)
+				return errFactory.Wrap(errors.ErrEnableAutoFan, err)
 			}
 			a.autoFanControl = true
 		}
@@ -422,7 +428,7 @@ func (a *AppState) handleFanControl(state *GPUState, targetFanSpeed int) error {
 		}
 		if !a.autoFanControl && !applyHysteresis(targetFanSpeed, state.CurrentFanSpeed, a.cfg.Hysteresis) {
 			if err := a.gpuDevice.SetFanSpeed(gpu.FanSpeed(targetFanSpeed)); err != nil {
-				return errors.Wrap(gpu.ErrSetFanSpeed, err)
+				return errFactory.Wrap(gpu.ErrSetFanSpeed, err)
 			}
 			logger.Debug().Msgf("Fan speed changed from %d to %d", state.CurrentFanSpeed, targetFanSpeed)
 		}
@@ -432,10 +438,12 @@ func (a *AppState) handleFanControl(state *GPUState, targetFanSpeed int) error {
 }
 
 func (a *AppState) handlePowerLimit(state *GPUState, targetPowerLimit int) error {
+	errFactory := errors.New()
+
 	if !a.cfg.Performance {
 		if !applyHysteresis(targetPowerLimit, state.CurrentPowerLimit, powerLimitHysteresis) {
 			if err := a.gpuDevice.SetPowerLimit(gpu.PowerLimit(targetPowerLimit)); err != nil {
-				return errors.Wrap(gpu.ErrSetPowerLimit, err)
+				return errFactory.Wrap(gpu.ErrSetPowerLimit, err)
 			}
 			logger.Debug().Msgf("Power limit changed from %d to %d", state.CurrentPowerLimit, targetPowerLimit)
 		}
@@ -443,7 +451,7 @@ func (a *AppState) handlePowerLimit(state *GPUState, targetPowerLimit int) error
 		maxPowerLimit := a.gpuDevice.GetPowerLimits().Max
 		if state.CurrentPowerLimit < int(maxPowerLimit) {
 			if err := a.gpuDevice.SetPowerLimit(maxPowerLimit); err != nil {
-				return errors.Wrap(gpu.ErrSetPowerLimit, err)
+				return errFactory.Wrap(gpu.ErrSetPowerLimit, err)
 			}
 			logger.Debug().Msgf("Power limit set to max: %d", maxPowerLimit)
 		}

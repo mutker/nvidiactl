@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"codeberg.org/mutker/nvidiactl/internal/errors"
-	"codeberg.org/mutker/nvidiactl/internal/logger"
 )
 
 type service struct {
@@ -13,13 +12,15 @@ type service struct {
 }
 
 func NewService(cfg Config) (Collector, error) {
+	errFactory := errors.New()
+
 	if err := cfg.Validate(); err != nil {
-		return nil, errors.Wrap(ErrInvalidConfig, err)
+		return nil, errFactory.Wrap(ErrInvalidConfig, err)
 	}
 
 	repo, err := NewRepository(cfg)
 	if err != nil {
-		return nil, err // Already wrapped with domain error
+		return nil, err // Already wrapped with appropriate error
 	}
 
 	return &service{
@@ -29,26 +30,29 @@ func NewService(cfg Config) (Collector, error) {
 }
 
 func (s *service) Record(ctx context.Context, snapshot *MetricsSnapshot) error {
+	errFactory := errors.New()
+
 	if snapshot == nil {
-		return errors.New(ErrInvalidMetrics)
+		return errFactory.New(ErrInvalidMetrics)
 	}
 
 	select {
 	case <-ctx.Done():
-		return errors.Wrap(ErrOperationTimeout, ctx.Err())
+		return errFactory.Wrap(ErrOperationTimeout, ctx.Err())
 	default:
-		if err := s.repo.Store(ctx, snapshot); err != nil {
-			return errors.Wrap(ErrMetricsCollection, err)
+		if err := s.repo.Record(snapshot); err != nil {
+			return errFactory.Wrap(ErrMetricsCollection, err)
 		}
-
-		logger.Debug().Msg("Telemetry metrics recorded successfully")
-		return nil
 	}
+
+	return nil
 }
 
 func (s *service) Close() error {
+	errFactory := errors.New()
+
 	if err := s.repo.Close(); err != nil {
-		return errors.Wrap(ErrServiceShutdown, err)
+		return errFactory.Wrap(ErrServiceShutdown, err)
 	}
 	return nil
 }

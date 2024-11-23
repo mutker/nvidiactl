@@ -1,6 +1,9 @@
 package gpu
 
-import "codeberg.org/mutker/nvidiactl/internal/errors"
+import (
+	"codeberg.org/mutker/nvidiactl/internal/errors"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
+)
 
 const (
 	// Initialization and Lifecycle Errors
@@ -32,3 +35,25 @@ const (
 	ErrDeviceCountFailed = errors.ErrorCode("gpu_device_count_failed")
 	ErrDeviceUUIDFailed  = errors.ErrorCode("gpu_device_uuid_failed")
 )
+
+// nvmlError represents an NVML-specific error
+type nvmlError struct {
+	ret nvml.Return
+}
+
+func (e nvmlError) Error() string {
+	return nvml.ErrorString(e.ret)
+}
+
+// newNVMLError creates an error from an NVML return code
+func newNVMLError(ret nvml.Return) error {
+	if ret == nvml.SUCCESS {
+		return nil
+	}
+	return &nvmlError{ret: ret}
+}
+
+// IsNVMLSuccess checks if a Return value indicates success
+func IsNVMLSuccess(ret nvml.Return) bool {
+	return ret == nvml.SUCCESS
+}

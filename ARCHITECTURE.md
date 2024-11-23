@@ -24,8 +24,8 @@ nvidiactl/
 │   │   ├── config.go       # Domain configuration
 │   │   ├── errors.go       # Domain-specific errors
 │   │   ├── interface.go    # Public domain interfaces and types
-│   │   ├── repository.go   # Data access implementation
-│   │   ├── schema.go       # Data structure definitions
+│   │   ├── repository.go   # (Optional) Data access implementation
+│   │   ├── schema.go       # (Optional) Data structure definitions
 │   │   └── utils.go        # (Optional) Domain-specific utilities
 │   ├── config/             # Config infrastructure
 │   ├── errors/             # Error infrastructure
