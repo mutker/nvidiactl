@@ -108,13 +108,6 @@ go build -v -o nvidiactl ./cmd/nvidiactl
 
 ## Architecture
 
-This project follows Domain-Driven Design principles:
-- Clear domain boundaries (gpu, metrics)
-- Interface-driven design
-- Rich domain-specific error handling
-- Dependency injection
-- Clear separation of concerns
-
 See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed design documentation.
 
 ## Contributing
