@@ -12,8 +12,8 @@ const (
 	ErrInvalidConfig   ErrorCode = "invalid_configuration"
 	ErrMissingConfig   ErrorCode = "missing_configuration"
 	ErrBindFlags       ErrorCode = "bind_flags_failed"
-	ErrReadConfig      ErrorCode = "read_config_failed"
 	ErrInvalidInterval ErrorCode = "invalid_interval"
+	ErrLoadConfig      ErrorCode = "load_configuration"
 
 	// Logging errors
 	ErrInvalidLogLevel ErrorCode = "invalid_log_level"
@@ -56,7 +56,7 @@ var errorMessages = map[ErrorCode]string{
 	ErrInvalidConfig:     "Invalid configuration",
 	ErrMissingConfig:     "Missing configuration",
 	ErrBindFlags:         "Failed to bind flags",
-	ErrReadConfig:        "Failed to read configuration",
+	ErrLoadConfig:        "Failed to load configuration",
 	ErrInitFailed:        "Initialization failed",
 	ErrShutdownFailed:    "Shutdown failed",
 	ErrResourceBusy:      "Resource is busy",
