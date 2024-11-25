@@ -120,7 +120,6 @@ func main() {
 
 func New() (*AppState, error) {
 	errFactory := errors.New()
-	logger.Debug().Msg("Starting application initialization")
 
 	loader := config.NewLoader()
 	cfg, err := loader.Load(context.Background())
@@ -157,8 +156,6 @@ func New() (*AppState, error) {
 			return nil, errFactory.Wrap(errors.ErrInitApp, err)
 		}
 	}
-
-	logger.Debug().Msg("Application initialization completed successfully")
 
 	return &AppState{
 		cfg:       cfg,
@@ -274,7 +271,7 @@ func (a *AppState) getGPUState() (GPUState, error) {
 	// Get fan speeds
 	logger.Debug().Msg("Getting current fan speeds...")
 	currentFanSpeeds := a.gpuDevice.GetCurrentFanSpeeds()
-	logger.Debug().Interface("fanSpeeds", currentFanSpeeds).Msg("Got fan speeds")
+	logger.Debug().Interface("fanSpeeds", currentFanSpeeds).Msg("Current fan speeds retrieved")
 
 	// Get power limit
 	logger.Debug().Msg("Getting current power limit...")
