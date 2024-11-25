@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"strings"
 
 	"codeberg.org/mutker/nvidiactl/internal/errors"
@@ -9,46 +10,110 @@ import (
 	"github.com/spf13/viper"
 )
 
-const DefaultLogLevel = "info"
+const DefaultLogLevel = LogLevelInfo
 
-type Config struct {
-	Interval    int    `mapstructure:"interval"`
-	Temperature int    `mapstructure:"temperature"`
-	FanSpeed    int    `mapstructure:"fanspeed"`
-	Hysteresis  int    `mapstructure:"hysteresis"`
-	Performance bool   `mapstructure:"performance"`
-	Monitor     bool   `mapstructure:"monitor"`
-	LogLevel    string `mapstructure:"log_level"`
-	Metrics     bool   `mapstructure:"metrics"`
-	MetricsDB   string `mapstructure:"database"`
+// viperConfig implements Provider interface using viper
+type viperConfig struct {
+	v *viper.Viper
 }
 
-func Load() (*Config, error) {
+// defaultLoader implements Loader interface
+type defaultLoader struct {
+	v *viper.Viper
+}
+
+// NewLoader creates a new configuration loader
+func NewLoader() Loader {
 	v := viper.New()
-
-	setDefaults(v)
-	defineFlags(v)
-
-	if err := bindFlags(v); err != nil {
-		return nil, err
-	}
-
-	if err := loadConfigFile(v); err != nil {
-		return nil, err
-	}
-
-	bindEnvVariables(v)
-
-	cfg := createConfig(v)
-	setLogLevel(cfg)
-
-	if err := validateConfig(cfg); err != nil {
-		return nil, err
-	}
-
-	return cfg, nil
+	return &defaultLoader{v: v}
 }
 
+func (l *defaultLoader) Load(_ context.Context, opts ...Option) (Provider, error) {
+	errFactory := errors.New()
+
+	// Apply options
+	o := &options{
+		envPrefix: "NVIDIACTL",
+	}
+	for _, opt := range opts {
+		if err := opt(o); err != nil {
+			return nil, errFactory.Wrap(errors.ErrLoadConfig, err)
+		}
+	}
+
+	setDefaults(l.v)
+	defineFlags(l.v)
+
+	if err := bindFlags(l.v); err != nil {
+		return nil, err
+	}
+
+	if err := loadConfigFile(l.v, o.configPath); err != nil {
+		return nil, err
+	}
+
+	bindEnvVariables(l.v, o.envPrefix)
+
+	if err := l.Validate(); err != nil {
+		return nil, err
+	}
+
+	return &viperConfig{v: l.v}, nil
+}
+
+func (l *defaultLoader) Validate() error {
+	errFactory := errors.New()
+
+	if l.v.GetInt("interval") <= 0 {
+		return errFactory.WithData(errors.ErrInvalidInterval, l.v.GetInt("interval"))
+	}
+
+	logLevel := LogLevel(l.v.GetString("log_level"))
+	if !logLevel.IsValid() {
+		return errFactory.WithData(errors.ErrInvalidLogLevel, logLevel)
+	}
+
+	return nil
+}
+
+// Provider interface implementation
+func (c *viperConfig) GetInterval() int {
+	return c.v.GetInt("interval")
+}
+
+func (c *viperConfig) GetTemperature() int {
+	return c.v.GetInt("temperature")
+}
+
+func (c *viperConfig) GetFanSpeed() int {
+	return c.v.GetInt("fanspeed")
+}
+
+func (c *viperConfig) GetHysteresis() int {
+	return c.v.GetInt("hysteresis")
+}
+
+func (c *viperConfig) IsPerformanceMode() bool {
+	return c.v.GetBool("performance")
+}
+
+func (c *viperConfig) IsMonitorMode() bool {
+	return c.v.GetBool("monitor")
+}
+
+func (c *viperConfig) GetLogLevel() string {
+	return c.v.GetString("log_level")
+}
+
+func (c *viperConfig) IsMetricsEnabled() bool {
+	return c.v.GetBool("metrics")
+}
+
+func (c *viperConfig) GetMetricsDBPath() string {
+	return c.v.GetString("database")
+}
+
+// Internal helper functions
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("interval", 2)
 	v.SetDefault("temperature", 80)
@@ -59,10 +124,21 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("log_level", DefaultLogLevel)
 	v.SetDefault("metrics", false)
 	v.SetDefault("database", "/var/lib/nvidiactl/metrics.db")
+}
 
-	// Register all config keys that might be in the config file
-	// v.RegisterAlias("fan_speed", "fanspeed")
-	// v.RegisterAlias("fan-speed", "fanspeed")
+func defineFlags(v *viper.Viper) {
+	pflag.String("config", "", "path to config file")
+	pflag.String("log-level", v.GetString("log_level"), "log level (debug, info, warning, error)")
+	pflag.Int("interval", v.GetInt("interval"), "interval between updates in seconds")
+	pflag.Int("temperature", v.GetInt("temperature"), "maximum allowed temperature in Celsius")
+	pflag.Int("fanspeed", v.GetInt("fanspeed"), "maximum allowed fan speed in percent")
+	pflag.Int("hysteresis", v.GetInt("hysteresis"), "temperature change required before adjusting fan speed")
+	pflag.Bool("performance", v.GetBool("performance"), "enable performance mode")
+	pflag.Bool("monitor", v.GetBool("monitor"), "enable monitor mode")
+	pflag.Bool("metrics", v.GetBool("metrics"), "enable metrics collection")
+	pflag.String("database", v.GetString("database"), "path to the metrics database file")
+
+	pflag.Parse()
 }
 
 func bindFlags(v *viper.Viper) error {
@@ -89,116 +165,44 @@ func bindFlags(v *viper.Viper) error {
 	return nil
 }
 
-func loadConfigFile(v *viper.Viper) error {
+func loadConfigFile(v *viper.Viper, configPath string) error {
 	errFactory := errors.New()
+
 	v.SetConfigName("nvidiactl.conf")
 	v.SetConfigType("toml")
 
 	v.AddConfigPath("/etc")
 	v.AddConfigPath(".")
 
-	configFile := v.GetString("config")
-	if configFile != "" {
-		v.SetConfigFile(configFile)
+	if configPath != "" {
+		v.SetConfigFile(configPath)
 	}
 
-	// Check explicit config file from flag/env
-	configFile = v.GetString("config")
-	if configFile != "" {
-		logger.Debug().Str("configFile", configFile).Msg("Using explicit config file path")
-		v.SetConfigFile(configFile)
-	}
-
-	// Try to read config
 	err := v.ReadInConfig()
 	if err != nil {
 		var configFileNotFound viper.ConfigFileNotFoundError
 		if errors.As(err, &configFileNotFound) {
-			logger.Debug().Msg("No config file found. Using defaults and flags.")
+			logger.Debug().Msg("no config file found, using defaults and flags")
 			return nil
 		}
 		logger.Debug().
 			Err(err).
-			Str("configFile", configFile).
+			Str("configPath", configPath).
 			Str("searchPaths", "/etc,./").
-			Msg("Error reading config file")
+			Msg("error reading config file")
 
-		return errFactory.Wrap(errors.ErrReadConfig, err)
+		return errFactory.Wrap(errors.ErrLoadConfig, err)
 	}
 
 	logger.Debug().
 		Str("file", v.ConfigFileUsed()).
-		Msg("Config file loaded")
-
-	logger.Debug().
-		Interface("config", v.AllSettings()).
-		Msg("Loaded config values")
+		Msg("config file loaded")
 
 	return nil
 }
 
-func bindEnvVariables(v *viper.Viper) {
-	v.SetEnvPrefix("NVIDIACTL")
+func bindEnvVariables(v *viper.Viper, prefix string) {
+	v.SetEnvPrefix(prefix)
 	v.AutomaticEnv()
-
-	// Replace dots with underscores in env vars
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-}
-
-func createConfig(v *viper.Viper) *Config {
-	return &Config{
-		Interval:    v.GetInt("interval"),
-		Temperature: v.GetInt("temperature"),
-		FanSpeed:    v.GetInt("fanspeed"),
-		Hysteresis:  v.GetInt("hysteresis"),
-		Performance: v.GetBool("performance"),
-		Monitor:     v.GetBool("monitor"),
-		LogLevel:    v.GetString("log_level"),
-		Metrics:     v.GetBool("metrics"),
-		MetricsDB:   v.GetString("database"),
-	}
-}
-
-func defineFlags(v *viper.Viper) {
-	// Define all flags
-	pflag.String("config", "", "Path to config file")
-	pflag.String("log-level", v.GetString("log_level"), "Log level (debug, info, warning, error)")
-	pflag.Int("interval", v.GetInt("interval"), "Interval between updates (in seconds)")
-	pflag.Int("temperature", v.GetInt("temperature"), "Maximum allowed temperature (in Celsius)")
-	pflag.Int("fanspeed", v.GetInt("fanspeed"), "Maximum allowed fan speed (in percent)")
-	pflag.Int("hysteresis", v.GetInt("hysteresis"), "Temperature change required before adjusting fan speed")
-	pflag.Bool("performance", v.GetBool("performance"), "Enable performance mode (disable power limit adjustments)")
-	pflag.Bool("monitor", v.GetBool("monitor"), "Enable monitor mode (only log, don't change settings)")
-	pflag.Bool("metrics", v.GetBool("metrics"), "Enable metrics collection")
-	pflag.String("database", v.GetString("database"), "Path to the metrics database file")
-
-	// Parse all flags
-	pflag.Parse()
-}
-
-func validateConfig(cfg *Config) error {
-	errFactory := errors.New()
-
-	if cfg.Interval <= 0 {
-		return errFactory.WithData(errors.ErrInvalidInterval, cfg.Interval)
-	}
-
-	validLevels := map[string]bool{
-		"debug":   true,
-		"info":    true,
-		"warning": true,
-		"error":   true,
-	}
-	if !validLevels[cfg.LogLevel] {
-		return errFactory.WithData(errors.ErrInvalidLogLevel, cfg.LogLevel)
-	}
-
-	return nil
-}
-
-func setLogLevel(cfg *Config) {
-	// If monitor mode is enabled, ensure minimum info level logging
-	if cfg.Monitor && cfg.LogLevel == "warning" {
-		cfg.LogLevel = "info"
-	}
 }
