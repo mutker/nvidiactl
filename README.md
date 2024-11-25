@@ -2,6 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Report Card](https://goreportcard.com/badge/codeberg.org/mutker/nvidiactl)](https://goreportcard.com/report/codeberg.org/mutker/nvidiactl)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://codeberg.org/mutker/nvidiactl/releases)
 
 nvidiactl is a command-line tool providing automatic fan speed management and dynamic power limit adjustment for NVIDIA GPUs. It can optionally be run as a systemd service.
 
