@@ -36,7 +36,7 @@ func NewRepository(cfg Config) (MetricsRepository, error) {
 	}
 
 	// Open database with specific pragmas for better performance and safety
-	dsn := cfg.DBPath + "?_journal=WAL&_timeout=5000&_sync=NORMAL&_busy_timeout=5000"
+	dsn := cfg.DBPath + "?_journal=WAL&_auto_vacuum=2;"
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, errFactory.WithData(ErrStorageInit, struct {
@@ -143,6 +143,5 @@ func (r *repository) Close() error {
 			Error: err.Error(),
 		})
 	}
-
 	return nil
 }

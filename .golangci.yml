@@ -4,7 +4,6 @@ linters:
     - copyloopvar
     - depguard
     - inamedparam # Our domain types are self-documenting
-    - execinquery
     - exhaustruct
     - exportloopref
     - gochecknoglobals
