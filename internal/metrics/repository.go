@@ -165,17 +165,21 @@ func (r *repository) flush() error {
 		return nil
 	}
 
+	errFactory := errors.New()
+
 	tx, err := r.db.Begin()
 	if err != nil {
 		r.logger.Error().Err(err).Msg("Failed to begin transaction")
-		return err
+		return errFactory.Wrap(ErrTransactionFailed, err)
 	}
 
 	stmt, err := tx.Prepare(GetInsertMetricSQL())
 	if err != nil {
 		r.logger.Error().Err(err).Msg("Failed to prepare statement")
-		tx.Rollback()
-		return err
+		if err := tx.Rollback(); err != nil {
+			r.logger.Error().Err(err).Msg("Failed to roll back transaction")
+		}
+		return errFactory.Wrap(ErrTransactionFailed, err)
 	}
 	defer stmt.Close()
 
@@ -195,14 +199,16 @@ func (r *repository) flush() error {
 
 		if _, err := stmt.Exec(values...); err != nil {
 			r.logger.Error().Err(err).Msg("Failed to execute insert")
-			tx.Rollback()
-			return err
+			if err := tx.Rollback(); err != nil {
+				r.logger.Error().Err(err).Msg("Failed to roll back transaction")
+			}
+			return errFactory.Wrap(ErrTransactionFailed, err)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		r.logger.Error().Err(err).Msg("Failed to commit transaction")
-		return err
+		return errFactory.Wrap(ErrTransactionFailed, err)
 	}
 
 	r.logger.Debug().Int("records", len(r.buffer)).Msg("Flushed metrics to database")
