@@ -1,76 +1,89 @@
+version: "2"
 linters:
-  enable-all: true
+  default: all
   disable:
     - copyloopvar
     - depguard
-    - inamedparam # Our domain types are self-documenting
     - exhaustruct
-    - exportloopref
     - gochecknoglobals
-    - gci # https://github.com/golangci/golangci-lint/issues/1490
     - godot
-    - gomnd
-    - interfacebloat # Interfaces reflect complete domain behavior
+    - inamedparam
+    - interfacebloat
     - intrange
-    - ireturn # Domain interfaces are intentionally returned for DDD
-    - nlreturn # Domain logic often requires complex error handling
-    - varnamelen # Domain type names are self-documenting
-    - wsl # Domain-specific formatting takes precedence
+    - ireturn
+    - mnd
+    - nlreturn
+    - varnamelen
+    - wsl
     - zerologlint
-
-linters-settings:
-  dupl:
-    threshold: 100
-  funlen:
-    lines: -1 # the number of lines (code + empty lines) is not a right metric and leads to code without empty line or one-liner.
-    statements: 50
-  goconst:
-    min-len: 2
-    min-occurrences: 3
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-    disabled-checks:
-      - dupImport # https://github.com/go-critic/go-critic/issues/845
-      - ifElseChain
-      - octalLiteral
-      - whyNoLint
-  godox:
-    keywords:
-      - FIXME
-  lll:
-    line-length: 140
-  mnd:
-    ignored-functions:
-      - '^v\.SetDefault'
-  misspell:
-    locale: US
-    ignore-words:
-      - "importas" # linter name
-  nestif:
-    # Minimal complexity of if statements to report.
-    # Default: 5
-    min-complexity: 10
-  nolintlint:
-    allow-unused: false # report any unused nolint directives
-    require-explanation: true # require an explanation for nolint directives
-    require-specific: true # require nolint directives to be specific about which linter is being skipped
-  paralleltest:
-    # Ignore missing calls to `t.Parallel()` and only report incorrect uses of it.
-    # Default: false
-    ignore-missing: true
-    # Ignore missing calls to `t.Parallel()` in subtests. Top-level tests are
-    # still required to have `t.Parallel`, but subtests are allowed to skip it.
-    # Default: false
-    ignore-missing-subtests: true
-  revive:
-    rules:
-      - name: indent-error-flow
-      - name: unexported-return
-        disabled: true
-      - name: unused-parameter
-      - name: unused-receiver
+  settings:
+    dupl:
+      threshold: 100
+    funlen:
+      lines: -1
+      statements: 50
+    goconst:
+      min-len: 2
+      min-occurrences: 3
+    gocritic:
+      disabled-checks:
+        - dupImport
+        - ifElseChain
+        - octalLiteral
+        - whyNoLint
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+    godox:
+      keywords:
+        - FIXME
+    lll:
+      line-length: 140
+    misspell:
+      locale: US
+      ignore-rules:
+        - importas
+    mnd:
+      ignored-functions:
+        - ^v\.SetDefault
+    nestif:
+      min-complexity: 10
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    paralleltest:
+      ignore-missing: true
+      ignore-missing-subtests: true
+    revive:
+      rules:
+        - name: indent-error-flow
+        - name: unexported-return
+          disabled: true
+        - name: unused-parameter
+        - name: unused-receiver
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
