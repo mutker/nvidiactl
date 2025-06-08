@@ -19,13 +19,14 @@ type viperConfig struct {
 
 // defaultLoader implements Loader interface
 type defaultLoader struct {
-	v *viper.Viper
+	v   *viper.Viper
+	log logger.Logger
 }
 
 // NewLoader creates a new configuration loader
-func NewLoader() Loader {
+func NewLoader(log logger.Logger) Loader {
 	v := viper.New()
-	return &defaultLoader{v: v}
+	return &defaultLoader{v: v, log: log}
 }
 
 func (l *defaultLoader) Load(_ context.Context, opts ...Option) (Provider, error) {
@@ -48,7 +49,7 @@ func (l *defaultLoader) Load(_ context.Context, opts ...Option) (Provider, error
 		return nil, err
 	}
 
-	if err := loadConfigFile(l.v, o.configPath); err != nil {
+	if err := l.loadConfigFile(o.configPath); err != nil {
 		return nil, err
 	}
 
@@ -165,27 +166,27 @@ func bindFlags(v *viper.Viper) error {
 	return nil
 }
 
-func loadConfigFile(v *viper.Viper, configPath string) error {
+func (l *defaultLoader) loadConfigFile(configPath string) error {
 	errFactory := errors.New()
 
-	v.SetConfigName("nvidiactl.conf")
-	v.SetConfigType("toml")
+	l.v.SetConfigName("nvidiactl.conf")
+	l.v.SetConfigType("toml")
 
-	v.AddConfigPath("/etc")
-	v.AddConfigPath(".")
+	l.v.AddConfigPath("/etc")
+	l.v.AddConfigPath(".")
 
 	if configPath != "" {
-		v.SetConfigFile(configPath)
+		l.v.SetConfigFile(configPath)
 	}
 
-	err := v.ReadInConfig()
+	err := l.v.ReadInConfig()
 	if err != nil {
 		var configFileNotFound viper.ConfigFileNotFoundError
 		if errors.As(err, &configFileNotFound) {
-			logger.Debug().Msg("no config file found, using defaults and flags")
+			l.log.Debug().Msg("no config file found, using defaults and flags")
 			return nil
 		}
-		logger.Debug().
+		l.log.Debug().
 			Err(err).
 			Str("configPath", configPath).
 			Str("searchPaths", "/etc,./").
@@ -194,8 +195,8 @@ func loadConfigFile(v *viper.Viper, configPath string) error {
 		return errFactory.Wrap(errors.ErrLoadConfig, err)
 	}
 
-	logger.Debug().
-		Str("file", v.ConfigFileUsed()).
+	l.log.Debug().
+		Str("file", l.v.ConfigFileUsed()).
 		Msg("config file loaded")
 
 	return nil

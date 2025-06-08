@@ -21,13 +21,15 @@ type powerController struct {
 	lastLimit    PowerLimit
 	powerHistory []PowerLimit
 	mu           sync.RWMutex
+	logger       logger.Logger
 }
 
-func newPowerController(device nvml.Device) (PowerController, error) {
+func newPowerController(device nvml.Device, log logger.Logger) (PowerController, error) {
 	errFactory := errors.New()
 	pc := &powerController{
 		device:       device,
 		powerHistory: make([]PowerLimit, 0, powerLimitWindowSize),
+		logger:       log,
 	}
 
 	minLimit, maxLimit, ret := device.GetPowerManagementLimitConstraints()
@@ -110,12 +112,12 @@ func (pc *powerController) GetCurrentLimit() PowerLimit {
 
 	limit, ret := pc.device.GetPowerManagementLimit()
 	if !IsNVMLSuccess(ret) {
-		logger.Debug().Msgf("Failed to get power limit: %s", nvml.ErrorString(ret))
+		pc.logger.Debug().Msgf("Failed to get power limit: %s", nvml.ErrorString(ret))
 		return pc.currentLimit
 	}
 
 	currentLimit := PowerLimit(limit / milliWattsToWatts)
-	logger.Debug().Int("powerLimit", int(currentLimit)).Msg("Current power limit retrieved")
+	pc.logger.Debug().Int("powerLimit", int(currentLimit)).Msg("Current power limit retrieved")
 
 	return currentLimit
 }

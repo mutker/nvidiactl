@@ -9,8 +9,6 @@ import (
 	"github.com/rs/zerolog"
 )
 
-var log zerolog.Logger
-
 type LogLevel int8
 
 var logLevelMap = map[string]LogLevel{
@@ -32,6 +30,10 @@ type LogEvent struct {
 	*zerolog.Event
 }
 
+type logger struct {
+	log zerolog.Logger
+}
+
 func (e *LogEvent) Msg(msg string) {
 	e.Event.Msg(msg)
 }
@@ -40,8 +42,8 @@ func (e *LogEvent) Send() {
 	e.Event.Send()
 }
 
-// Init initializes the logger based on the given configuration
-func Init(logLevel string, isService bool) {
+// New initializes the logger based on the given configuration
+func New(logLevel string, isService bool) Logger {
 	output := zerolog.ConsoleWriter{
 		Out:        os.Stdout,
 		TimeFormat: time.RFC3339,
@@ -54,19 +56,16 @@ func Init(logLevel string, isService bool) {
 		}
 	}
 
-	log = zerolog.New(output).With().Timestamp().Logger()
+	log := zerolog.New(output).With().Timestamp().Logger()
 
 	// Set log level from string
 	if level, ok := logLevelMap[logLevel]; ok {
-		SetLogLevel(level)
+		log = log.Level(zerolog.Level(level))
 	} else {
-		SetLogLevel(WarnLevel) // Fallback to warning if invalid
+		log = log.Level(zerolog.WarnLevel) // Fallback to warning if invalid
 	}
-}
 
-// SetLogLevel sets the global log level
-func SetLogLevel(level LogLevel) {
-	zerolog.SetGlobalLevel(zerolog.Level(level))
+	return &logger{log}
 }
 
 // IsService checks if the application is running as a service
@@ -85,28 +84,28 @@ func IsService() bool {
 }
 
 // Debug logs a debug message
-func Debug() *LogEvent {
-	return &LogEvent{log.Debug()}
+func (l *logger) Debug() *LogEvent {
+	return &LogEvent{l.log.Debug()}
 }
 
 // Info logs an info message
-func Info() *LogEvent {
-	return &LogEvent{log.Info()}
+func (l *logger) Info() *LogEvent {
+	return &LogEvent{l.log.Info()}
 }
 
 // Warn logs a warning message
-func Warn() *LogEvent {
-	return &LogEvent{log.Warn()}
+func (l *logger) Warn() *LogEvent {
+	return &LogEvent{l.log.Warn()}
 }
 
 // Error logs an error message
-func Error() *LogEvent {
-	return &LogEvent{log.Error()}
+func (l *logger) Error() *LogEvent {
+	return &LogEvent{l.log.Error()}
 }
 
 // ErrorWithCode logs an error message with a specific error code
-func ErrorWithCode(err errors.Error) *LogEvent {
-	event := log.Error()
+func (l *logger) ErrorWithCode(err errors.Error) *LogEvent {
+	event := l.log.Error()
 	if err != nil {
 		event = event.Str("error_code", string(err.Code())).
 			Str("error_message", err.Error())
@@ -119,8 +118,8 @@ func ErrorWithCode(err errors.Error) *LogEvent {
 }
 
 // FatalWithCode logs a fatal message with a specific error code and exits the program
-func FatalWithCode(err errors.Error) *LogEvent {
-	event := log.Fatal()
+func (l *logger) FatalWithCode(err errors.Error) *LogEvent {
+	event := l.log.Fatal()
 	if err != nil {
 		event = event.Str("error_code", string(err.Code())).
 			Str("error_message", err.Error())
@@ -132,8 +131,8 @@ func FatalWithCode(err errors.Error) *LogEvent {
 	return &LogEvent{event}
 }
 
-func ErrorWithContext(err errors.Error, component, operation string) *LogEvent {
-	event := log.Error().
+func (l *logger) ErrorWithContext(err errors.Error, component, operation string) *LogEvent {
+	event := l.log.Error().
 		Str("component", component).
 		Str("operation", operation)
 

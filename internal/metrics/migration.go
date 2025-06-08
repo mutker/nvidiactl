@@ -13,7 +13,7 @@ import (
 
 const backupDir = "/var/lib/nvidiactl/backups"
 
-func backupDatabase(db *sql.DB, version int) (string, error) {
+func backupDatabase(db *sql.DB, version int, log logger.Logger) (string, error) {
 	errFactory := errors.New()
 
 	// Ensure backup directory exists
@@ -48,7 +48,7 @@ func backupDatabase(db *sql.DB, version int) (string, error) {
 		})
 	}
 
-	logger.Info().
+	log.Info().
 		Str("path", backupPath).
 		Int("version", version).
 		Msg("Database backup created")
@@ -59,16 +59,16 @@ func backupDatabase(db *sql.DB, version int) (string, error) {
 // ValidateAndUpdateSchema checks the schema version and recreates it if needed.
 // If a schema exists but the version doesn't match, it creates a backup
 // before recreating the schema.
-func ValidateAndUpdateSchema(db *sql.DB) error {
+func ValidateAndUpdateSchema(db *sql.DB, log logger.Logger) error {
 	errFactory := errors.New()
 
 	version, err := GetSchemaVersion(db)
 	if err != nil {
-		logger.Debug().Err(err).Msg("Failed to get schema version")
+		log.Debug().Err(err).Msg("Failed to get schema version")
 		return errFactory.Wrap(ErrSchemaValidationFailed, err)
 	}
 
-	logger.Debug().
+	log.Debug().
 		Int("version", version).
 		Bool("init_db", version == 0).
 		Msg("Current schema version")
@@ -77,7 +77,7 @@ func ValidateAndUpdateSchema(db *sql.DB) error {
 	if version == 0 || version != SchemaVersion {
 		// If existing schema, backup first
 		if version != 0 {
-			backupPath, err := backupDatabase(db, version)
+			backupPath, err := backupDatabase(db, version, log)
 			if err != nil {
 				return errFactory.WithData(ErrSchemaMigrationFailed, struct {
 					Phase string
@@ -92,19 +92,19 @@ func ValidateAndUpdateSchema(db *sql.DB) error {
 		}
 
 		// Drop existing tables and create new schema
-		if err := dropTables(db); err != nil {
+		if err := dropTables(db, log); err != nil {
 			return err
 		}
-		return InitSchema(db)
+		return InitSchema(db, log)
 	}
 
-	logger.Debug().
+	log.Debug().
 		Int("version", version).
 		Msg("Schema version is current")
 	return nil
 }
 
-func dropTables(db *sql.DB) error {
+func dropTables(db *sql.DB, log logger.Logger) error {
 	errFactory := errors.New()
 
 	tx, err := db.Begin()
@@ -119,7 +119,7 @@ func dropTables(db *sql.DB) error {
 			if err := tx.Rollback(); err != nil {
 				// Only log if it's not the "already committed" error
 				if !errors.Is(err, sql.ErrTxDone) {
-					logger.Debug().Err(err).Msg("Failed to rollback drop tables")
+					log.Debug().Err(err).Msg("Failed to rollback drop tables")
 				}
 			}
 		}

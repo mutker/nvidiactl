@@ -2,34 +2,32 @@ package metrics
 
 import (
 	"database/sql"
-	"strings"
 
 	"codeberg.org/mutker/nvidiactl/internal/errors"
 	"codeberg.org/mutker/nvidiactl/internal/logger"
 )
 
 const (
-	SchemaVersion = 1 // Increment version for breaking change
+	SchemaVersion = 2 // Increment version for breaking change
 
 	// SQL statements derived from schema
 	createTablesSQL = `
-    CREATE TABLE IF NOT EXISTS schema_versions (
-        version     INTEGER PRIMARY KEY,
-        applied_at  TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS metrics (
-        timestamp        INTEGER PRIMARY KEY,
-        fan_speed_current INTEGER NOT NULL CHECK (typeof(fan_speed_current) = 'integer'),
-        fan_speed_target  INTEGER NOT NULL CHECK (typeof(fan_speed_target) = 'integer'),
-        temp_current     INTEGER NOT NULL CHECK (typeof(temp_current) = 'integer'),
-        temp_average     INTEGER NOT NULL CHECK (typeof(temp_average) = 'integer'),
-        power_current    INTEGER NOT NULL CHECK (typeof(power_current) = 'integer'),
-        power_target     INTEGER NOT NULL CHECK (typeof(power_target) = 'integer'),
-        power_average    INTEGER NOT NULL CHECK (typeof(power_average) = 'integer'),
-        auto_fan_control INTEGER NOT NULL CHECK (auto_fan_control IN (0, 1)),
-        performance_mode INTEGER NOT NULL CHECK (performance_mode IN (0, 1))
-    );`
+	   CREATE TABLE IF NOT EXISTS schema_versions (
+	       version     INTEGER PRIMARY KEY,
+	       applied_at  TEXT NOT NULL
+	   );
+	   CREATE TABLE IF NOT EXISTS metrics (
+	       timestamp        INTEGER PRIMARY KEY,
+	       fan_speed_current INTEGER NOT NULL CHECK (typeof(fan_speed_current) = 'integer'),
+	       fan_speed_target  INTEGER NOT NULL CHECK (typeof(fan_speed_target) = 'integer'),
+	       temp_current     INTEGER NOT NULL CHECK (typeof(temp_current) = 'integer'),
+	       temp_average     INTEGER NOT NULL CHECK (typeof(temp_average) = 'integer'),
+	       power_current    INTEGER NOT NULL CHECK (typeof(power_current) = 'integer'),
+	       power_target     INTEGER NOT NULL CHECK (typeof(power_target) = 'integer'),
+	       power_average    INTEGER NOT NULL CHECK (typeof(power_average) = 'integer'),
+	       auto_fan_control INTEGER NOT NULL CHECK (auto_fan_control IN (0, 1)),
+	       performance_mode INTEGER NOT NULL CHECK (performance_mode IN (0, 1))
+	   );`
 
 	insertMetricsSQL = `
     INSERT INTO metrics (
@@ -42,10 +40,10 @@ const (
 )
 
 // InitSchema creates a new database schema with the current version
-func InitSchema(db *sql.DB) error {
+func InitSchema(db *sql.DB, log logger.Logger) error {
 	errFactory := errors.New()
 
-	logger.Debug().Msg("Creating database...")
+	log.Debug().Msg("Creating database...")
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -59,33 +57,25 @@ func InitSchema(db *sql.DB) error {
 			if err := tx.Rollback(); err != nil {
 				// Only log if it's not the "already committed" error
 				if !errors.Is(err, sql.ErrTxDone) {
-					logger.Debug().Err(err).Msg("Failed to rollback transaction")
+					log.Debug().Err(err).Msg("Failed to rollback transaction")
 				}
 			}
 		}
 	}()
 
-	// Split and execute each statement separately
-	statements := strings.Split(createTablesSQL, ";")
-	for _, stmt := range statements {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
-		}
-
-		logger.Debug().Str("sql", stmt).Msg("Executing SQL statement")
-		if _, err := tx.Exec(stmt); err != nil {
-			return errFactory.WithData(ErrSchemaInitFailed, struct {
-				Error string
-				SQL   string
-			}{
-				Error: err.Error(),
-				SQL:   stmt,
-			})
-		}
+	// Execute schema creation
+	log.Debug().Str("sql", createTablesSQL).Msg("Executing SQL statement")
+	if _, err := tx.Exec(createTablesSQL); err != nil {
+		return errFactory.WithData(ErrSchemaInitFailed, struct {
+			Error string
+			SQL   string
+		}{
+			Error: err.Error(),
+			SQL:   createTablesSQL,
+		})
 	}
 
-	logger.Debug().Msg("Recording schema version...")
+	log.Debug().Msg("Recording schema version...")
 	// Record schema version
 	if _, err := tx.Exec(`
         INSERT INTO schema_versions (version, applied_at)
@@ -100,13 +90,13 @@ func InitSchema(db *sql.DB) error {
 		})
 	}
 
-	logger.Debug().Msg("Committing transaction...")
+	log.Debug().Msg("Committing transaction...")
 	if err := tx.Commit(); err != nil {
 		return errFactory.Wrap(ErrSchemaInitFailed, err)
 	}
 	committed = true
 
-	logger.Info().
+	log.Info().
 		Int("version", SchemaVersion).
 		Msg("Schema initialized successfully")
 

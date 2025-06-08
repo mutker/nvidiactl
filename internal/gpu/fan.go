@@ -16,13 +16,15 @@ type fanController struct {
 	lastSpeeds []FanSpeed
 	autoMode   bool
 	mu         sync.RWMutex
+	logger     logger.Logger
 }
 
-func newFanController(device nvml.Device) (FanController, error) {
+func newFanController(device nvml.Device, log logger.Logger) (FanController, error) {
 	errFactory := errors.New()
 	fc := &fanController{
 		device:   device,
 		autoMode: true,
+		logger:   log,
 	}
 
 	count, ret := device.GetNumFans()
@@ -174,13 +176,13 @@ func (fc *fanController) GetCurrentSpeeds() []FanSpeed {
 	for i := 0; i < fc.count; i++ {
 		speed, ret := fc.device.GetFanSpeed_v2(i)
 		if ret != nvml.SUCCESS {
-			logger.Debug().Msgf("Failed to get fan %d speed: %s", i, nvml.ErrorString(ret))
+			fc.logger.Debug().Msgf("Failed to get fan %d speed: %s", i, nvml.ErrorString(ret))
 			continue
 		}
 		speeds[i] = FanSpeed(speed)
 	}
 
-	logger.Debug().Interface("fanSpeeds", speeds).Msg("Current fan speeds retrieved")
+	fc.logger.Debug().Interface("fanSpeeds", speeds).Msg("Current fan speeds retrieved")
 
 	return speeds
 }

@@ -8,14 +8,15 @@ import (
 )
 
 type service struct {
-	repo MetricsRepository
-	cfg  Config
+	repo   MetricsRepository
+	cfg    Config
+	logger logger.Logger
 }
 
 // No-op implementation
 type noopMetricsCollector struct{}
 
-func NewService(cfg Config) (MetricsCollector, error) {
+func NewService(cfg Config, log logger.Logger) (MetricsCollector, error) {
 	errFactory := errors.New()
 
 	if err := cfg.Validate(); err != nil {
@@ -24,25 +25,26 @@ func NewService(cfg Config) (MetricsCollector, error) {
 
 	// If metrics is disabled, return a no-op collector
 	if !cfg.Enabled {
-		logger.Debug().Msg("Metrics collection disabled, using no-op collector")
+		log.Debug().Msg("Metrics collection disabled, using no-op collector")
 		return &noopMetricsCollector{}, nil
 	}
 
 	// Remove reference to undefined removeOldDatabase
-	repo, err := NewRepository(cfg)
+	repo, err := NewRepository(cfg, log)
 	if err != nil {
-		logger.Debug().Err(err).Msg("Failed to create metrics repository")
+		log.Debug().Err(err).Msg("Failed to create metrics repository")
 		return nil, err
 	}
 
-	logger.Debug().
+	log.Debug().
 		Str("db_path", cfg.DBPath).
 		Bool("enabled", cfg.Enabled).
 		Msg("Metrics service initialized successfully")
 
 	return &service{
-		repo: repo,
-		cfg:  cfg,
+		repo:   repo,
+		cfg:    cfg,
+		logger: log,
 	}, nil
 }
 

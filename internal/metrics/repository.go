@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"codeberg.org/mutker/nvidiactl/internal/errors"
 	"codeberg.org/mutker/nvidiactl/internal/logger"
@@ -11,11 +13,17 @@ import (
 )
 
 type repository struct {
-	db         *sql.DB
-	insertStmt *sql.Stmt
+	db            *sql.DB
+	logger        logger.Logger
+	cfg           Config
+	mu            sync.Mutex
+	buffer        []*MetricsSnapshot
+	flushTicker   *time.Ticker
+	shutdownChan  chan struct{}
+	flushDoneChan chan struct{}
 }
 
-func NewRepository(cfg Config) (MetricsRepository, error) {
+func NewRepository(cfg Config, log logger.Logger) (MetricsRepository, error) {
 	errFactory := errors.New()
 
 	if cfg.DBPath == "" {
@@ -36,7 +44,7 @@ func NewRepository(cfg Config) (MetricsRepository, error) {
 	}
 
 	// Open database with specific pragmas for better performance and safety
-	dsn := cfg.DBPath + "?_journal=WAL&_auto_vacuum=2;"
+	dsn := cfg.DBPath + "?_journal=WAL&_auto_vacuum=2"
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, errFactory.WithData(ErrStorageInit, struct {
@@ -49,7 +57,7 @@ func NewRepository(cfg Config) (MetricsRepository, error) {
 	}
 
 	// Validate if schema is current, with backup if needed
-	if err := ValidateAndUpdateSchema(db); err != nil {
+	if err := ValidateAndUpdateSchema(db, log); err != nil {
 		db.Close()
 		return nil, errFactory.WithData(ErrStorageInit, struct {
 			Phase string
@@ -60,72 +68,57 @@ func NewRepository(cfg Config) (MetricsRepository, error) {
 		})
 	}
 
-	// Prepare insert statement
-	stmt, err := db.Prepare(GetInsertMetricSQL())
-	if err != nil {
-		db.Close()
-		return nil, errFactory.WithData(ErrStorageInit, struct {
-			Phase string
-			Error string
-		}{
-			Phase: "prepare_statement",
-			Error: err.Error(),
-		})
-	}
-
-	logger.Info().
+	log.Info().
 		Str("path", cfg.DBPath).
 		Int("schema_version", SchemaVersion).
+		Int("batch_size", cfg.BatchSize).
+		Int("batch_timeout", cfg.BatchTimeout).
 		Msg("Metrics repository initialized")
 
-	return &repository{
-		db:         db,
-		insertStmt: stmt,
-	}, nil
+	repo := &repository{
+		db:            db,
+		logger:        log,
+		cfg:           cfg,
+		buffer:        make([]*MetricsSnapshot, 0, cfg.BatchSize),
+		shutdownChan:  make(chan struct{}),
+		flushDoneChan: make(chan struct{}),
+	}
+
+	// Start background goroutine for periodic flushing if batching is enabled
+	if cfg.BatchSize > 0 && cfg.BatchTimeout > 0 {
+		repo.flushTicker = time.NewTicker(time.Duration(cfg.BatchTimeout) * time.Second)
+		go repo.flusher()
+	}
+
+	return repo, nil
 }
 
 func (r *repository) Record(snapshot *MetricsSnapshot) error {
-	errFactory := errors.New()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	values := []interface{}{
-		snapshot.Timestamp.Unix(),
-		int64(snapshot.FanSpeed.Current),
-		int64(snapshot.FanSpeed.Target),
-		int64(snapshot.Temperature.Current),
-		int64(snapshot.Temperature.Average),
-		int64(snapshot.PowerLimit.Current),
-		int64(snapshot.PowerLimit.Target),
-		int64(snapshot.PowerLimit.Average),
-		int64(boolToInt(snapshot.SystemState.AutoFanControl)),
-		int64(boolToInt(snapshot.SystemState.PerformanceMode)),
-	}
+	r.buffer = append(r.buffer, snapshot)
 
-	if _, err := r.insertStmt.Exec(values...); err != nil {
-		return errFactory.WithData(ErrStorageAccess, struct {
-			Phase  string
-			Error  string
-			Values interface{}
-		}{
-			Phase:  "execute_insert",
-			Error:  err.Error(),
-			Values: values,
-		})
+	if len(r.buffer) >= r.cfg.BatchSize {
+		return r.flush()
 	}
 
 	return nil
 }
 
 func (r *repository) Close() error {
-	errFactory := errors.New()
+	// Signal the flusher goroutine to stop
+	close(r.shutdownChan)
 
-	// Close prepared statement
-	if err := r.insertStmt.Close(); err != nil {
-		logger.Debug().Err(err).Msg("Failed to close prepared statement")
-	}
+	// Stop the ticker
+	r.flushTicker.Stop()
+
+	// Wait for the flusher to finish its final flush
+	<-r.flushDoneChan
 
 	// Checkpoint WAL and cleanup on close
 	if _, err := r.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
-		return errFactory.WithData(ErrStorageClose, struct {
+		return errors.New().WithData(ErrStorageClose, struct {
 			Phase string
 			Error string
 		}{
@@ -135,7 +128,7 @@ func (r *repository) Close() error {
 	}
 
 	if err := r.db.Close(); err != nil {
-		return errFactory.WithData(ErrStorageClose, struct {
+		return errors.New().WithData(ErrStorageClose, struct {
 			Phase string
 			Error string
 		}{
@@ -143,5 +136,77 @@ func (r *repository) Close() error {
 			Error: err.Error(),
 		})
 	}
+
+	r.logger.Info().Msg("Metrics repository closed gracefully")
+
+	return nil
+}
+
+func (r *repository) flusher() {
+	defer close(r.flushDoneChan)
+
+	for {
+		select {
+		case <-r.flushTicker.C:
+			r.mu.Lock()
+			r.flush()
+			r.mu.Unlock()
+		case <-r.shutdownChan:
+			r.mu.Lock()
+			r.flush()
+			r.mu.Unlock()
+			return
+		}
+	}
+}
+
+func (r *repository) flush() error {
+	if len(r.buffer) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		r.logger.Error().Err(err).Msg("Failed to begin transaction")
+		return err
+	}
+
+	stmt, err := tx.Prepare(GetInsertMetricSQL())
+	if err != nil {
+		r.logger.Error().Err(err).Msg("Failed to prepare statement")
+		tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+
+	for _, snapshot := range r.buffer {
+		values := []interface{}{
+			snapshot.Timestamp.Unix(),
+			int64(snapshot.FanSpeed.Current),
+			int64(snapshot.FanSpeed.Target),
+			int64(snapshot.Temperature.Current),
+			int64(snapshot.Temperature.Average),
+			int64(snapshot.PowerLimit.Current),
+			int64(snapshot.PowerLimit.Target),
+			int64(snapshot.PowerLimit.Average),
+			int64(boolToInt(snapshot.SystemState.AutoFanControl)),
+			int64(boolToInt(snapshot.SystemState.PerformanceMode)),
+		}
+
+		if _, err := stmt.Exec(values...); err != nil {
+			r.logger.Error().Err(err).Msg("Failed to execute insert")
+			tx.Rollback()
+			return err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		r.logger.Error().Err(err).Msg("Failed to commit transaction")
+		return err
+	}
+
+	r.logger.Debug().Int("records", len(r.buffer)).Msg("Flushed metrics to database")
+	r.buffer = r.buffer[:0]
+
 	return nil
 }

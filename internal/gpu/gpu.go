@@ -22,12 +22,14 @@ type controller struct {
 	tempMu          sync.RWMutex // Separate mutex for temperature history
 	initialized     bool
 	mu              sync.RWMutex
+	logger          logger.Logger
 }
 
-func New() (Controller, error) {
+func New(log logger.Logger) (Controller, error) {
 	c := &controller{
 		nvml:        &nvmlWrapper{},
 		tempHistory: make([]Temperature, 0, temperatureWindowSize),
+		logger:      log,
 	}
 	return c, nil
 }
@@ -41,32 +43,32 @@ func (c *controller) Initialize() error {
 		return nil
 	}
 
-	logger.Debug().Msg("Initializing NVML...")
+	c.logger.Debug().Msg("Initializing NVML...")
 	if err := c.nvml.Initialize(); err != nil {
-		logger.Debug().Err(err).Msg("NVML initialization failed")
+		c.logger.Debug().Err(err).Msg("NVML initialization failed")
 		return errFactory.Wrap(ErrInitFailed, err)
 	}
 
-	logger.Debug().Msg("Getting GPU device...")
+	c.logger.Debug().Msg("Getting GPU device...")
 	device, err := c.nvml.GetDevice(defaultDeviceIndex)
 	if err != nil {
-		logger.Debug().Err(err).Msg("Failed to get GPU device")
+		c.logger.Debug().Err(err).Msg("Failed to get GPU device")
 		return errFactory.Wrap(ErrDeviceNotFound, err)
 	}
 	c.device = device
 
-	logger.Debug().Msg("Initializing fan controller...")
-	fanCtrl, err := newFanController(device)
+	c.logger.Debug().Msg("Initializing fan controller...")
+	fanCtrl, err := newFanController(device, c.logger)
 	if err != nil {
-		logger.Debug().Err(err).Msg("Failed to initialize fan controller")
+		c.logger.Debug().Err(err).Msg("Failed to initialize fan controller")
 		return errFactory.Wrap(ErrInitFailed, err)
 	}
 	c.fanController = fanCtrl
 
-	logger.Debug().Msg("Initializing power controller...")
-	powerCtrl, err := newPowerController(device)
+	c.logger.Debug().Msg("Initializing power controller...")
+	powerCtrl, err := newPowerController(device, c.logger)
 	if err != nil {
-		logger.Debug().Err(err).Msg("Failed to initialize power controller")
+		c.logger.Debug().Err(err).Msg("Failed to initialize power controller")
 		return errFactory.Wrap(ErrInitFailed, err)
 	}
 	c.powerController = powerCtrl
@@ -87,10 +89,12 @@ func (c *controller) Shutdown() error {
 	}
 
 	if err := c.nvml.Shutdown(); err != nil {
-		logger.Debug().Err(err).Msg("NVML shutdown failed")
+		c.logger.Debug().Err(err).Msg("NVML shutdown failed")
 		return errFactory.Wrap(ErrShutdownFailed, err)
 	}
 
+	c.fanController = nil
+	c.powerController = nil
 	c.initialized = false
 
 	return nil
@@ -109,7 +113,7 @@ func (c *controller) GetTemperature() (Temperature, error) {
 	temp, ret := c.device.GetTemperature(nvml.TEMPERATURE_GPU)
 	if !IsNVMLSuccess(ret) {
 		err := newNVMLError(ret)
-		logger.Debug().Err(err).Msg("Failed to read temperature")
+		c.logger.Debug().Err(err).Msg("Failed to read temperature")
 		return 0, errFactory.Wrap(ErrTemperatureReadFailed, err)
 	}
 
@@ -134,7 +138,7 @@ func (c *controller) GetAverageTemperature() Temperature {
 }
 
 func (c *controller) UpdateTemperatureHistory(temp Temperature) Temperature {
-	logger.Debug().Int("temp", int(temp)).Msg("Starting temperature history update")
+	c.logger.Debug().Int("temp", int(temp)).Msg("Starting temperature history update")
 
 	c.tempMu.Lock()
 	defer c.tempMu.Unlock()
@@ -150,7 +154,7 @@ func (c *controller) UpdateTemperatureHistory(temp Temperature) Temperature {
 	}
 	avg := sum / Temperature(len(c.tempHistory))
 
-	logger.Debug().
+	c.logger.Debug().
 		Int("avgTemperature", int(avg)).
 		Msg("Temperature history updated")
 
@@ -166,6 +170,8 @@ func (c *controller) GetFanControl() FanController {
 
 // GetCurrentFanSpeeds returns the current speeds of all fans
 func (c *controller) GetCurrentFanSpeeds() []FanSpeed {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if c.fanController == nil {
 		return nil
 	}
@@ -174,6 +180,8 @@ func (c *controller) GetCurrentFanSpeeds() []FanSpeed {
 
 func (c *controller) SetFanSpeed(speed FanSpeed) error {
 	errFactory := errors.New()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if c.fanController == nil {
 		return errFactory.New(ErrNotInitialized)
 	}
@@ -184,6 +192,8 @@ func (c *controller) SetFanSpeed(speed FanSpeed) error {
 }
 
 func (c *controller) GetLastFanSpeeds() []FanSpeed {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if c.fanController == nil {
 		return nil
 	}
@@ -191,6 +201,8 @@ func (c *controller) GetLastFanSpeeds() []FanSpeed {
 }
 
 func (c *controller) GetFanSpeedLimits() FanSpeedLimits {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if c.fanController == nil {
 		return FanSpeedLimits{}
 	}
@@ -200,6 +212,8 @@ func (c *controller) GetFanSpeedLimits() FanSpeedLimits {
 // EnableAutoFanControl enables automatic fan control
 func (c *controller) EnableAutoFanControl() error {
 	errFactory := errors.New()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if !c.initialized {
 		return errFactory.New(ErrNotInitialized)
 	}
@@ -212,6 +226,8 @@ func (c *controller) EnableAutoFanControl() error {
 // DisableAutoFanControl disables automatic fan control
 func (c *controller) DisableAutoFanControl() error {
 	errFactory := errors.New()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if !c.initialized {
 		return errFactory.New(ErrNotInitialized)
 	}
@@ -230,6 +246,8 @@ func (c *controller) GetPowerControl() PowerController {
 
 // GetCurrentPowerLimit returns the current power limit
 func (c *controller) GetCurrentPowerLimit() PowerLimit {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if c.powerController == nil {
 		return 0
 	}
@@ -239,6 +257,8 @@ func (c *controller) GetCurrentPowerLimit() PowerLimit {
 // SetPowerLimit sets the power limit
 func (c *controller) SetPowerLimit(limit PowerLimit) error {
 	errFactory := errors.New()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if c.powerController == nil {
 		return errFactory.New(ErrNotInitialized)
 	}
@@ -250,6 +270,8 @@ func (c *controller) SetPowerLimit(limit PowerLimit) error {
 
 // GetPowerLimits returns the power limit constraints
 func (c *controller) GetPowerLimits() PowerLimits {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if c.powerController == nil {
 		return PowerLimits{}
 	}
@@ -257,6 +279,8 @@ func (c *controller) GetPowerLimits() PowerLimits {
 }
 
 func (c *controller) UpdatePowerLimitHistory(limit PowerLimit) PowerLimit {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if c.powerController == nil {
 		return 0
 	}
