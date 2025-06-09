@@ -17,6 +17,7 @@ jobs:
         uses: https://code.forgejo.org/actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.FORGEJO_TOKEN }}
 
       - name: Setup Go
         uses: https://code.forgejo.org/actions/setup-go@v5
@@ -38,6 +39,7 @@ jobs:
         uses: https://code.forgejo.org/actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.FORGEJO_TOKEN }}
 
       - name: Setup Go
         uses: https://code.forgejo.org/actions/setup-go@v5
@@ -63,7 +65,7 @@ jobs:
 
       - name: Create release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
         run: |
           VERSION=${{ steps.release-info.outputs.version }}
 
@@ -72,7 +74,7 @@ jobs:
 
           echo "Creating release for version ${VERSION}"
           RELEASE_RESPONSE=$(curl -X POST \
-            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Authorization: token $FORGEJO_TOKEN" \
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
             "${{ github.api_url }}/repos/${{ github.repository }}/releases" \
@@ -96,7 +98,7 @@ jobs:
           echo "Uploading binary..."
 
           curl -X POST \
-            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Authorization: token $FORGEJO_TOKEN" \
             -H "Content-Type: application/octet-stream" \
             --data-binary @nvidiactl \
             "${{ github.api_url }}/repos/${{ github.repository }}/releases/${RELEASE_ID}/assets?name=nvidiactl"
