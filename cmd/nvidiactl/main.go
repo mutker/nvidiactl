@@ -47,6 +47,12 @@ type AppState struct {
 }
 
 func main() {
+	if err := run(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	errFactory := errors.New()
 
 	// Initialize with default log level first
@@ -58,38 +64,18 @@ func main() {
 			domainErr = errFactory.Wrap(errors.ErrInitApp, err)
 		}
 		log.ErrorWithCode(domainErr).Send()
-		os.Exit(1)
-		return
+		return errFactory.Wrap(errors.ErrInitApp, err)
 	}
-	defer pid.Remove()
-
-	log.Debug().
-		Str("config_env", os.Getenv("NVIDIACTL_CONFIG")).
-		Msg("Starting nvidiactl...")
-
-	// Create application state
-	a, err := newApplication(log)
-	if err != nil {
-		var domainErr errors.Error
-		if !errors.As(err, &domainErr) {
-			domainErr = errFactory.Wrap(errors.ErrMainLoop, err)
+	defer func() {
+		if err := pid.Remove(); err != nil {
+			log.Error().Err(err).Msg("Failed to remove PID file")
 		}
-		log.ErrorWithCode(domainErr).Send()
-		os.Exit(1)
-		return
-	}
+	}()
 
-	// Re-initialize logger with config settings
-	if a.cfg.GetLogLevel() != string(config.DefaultLogLevel) {
-		a.logger = logger.New(a.cfg.GetLogLevel(), logger.IsService())
+	a, err := initialize(log)
+	if err != nil {
+		return err
 	}
-
-	a.logger.Info().
-		Str("log_level", a.cfg.GetLogLevel()).
-		Bool("monitor_mode", a.cfg.IsMonitorMode()).
-		Bool("performance_mode", a.cfg.IsPerformanceMode()).
-		Bool("metrics", a.cfg.IsMetricsEnabled()).
-		Msg("Configuration loaded and applied")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -127,8 +113,42 @@ func main() {
 		}
 		a.logger.ErrorWithCode(domainErr).Send()
 		a.cleanup()
-		os.Exit(1)
+		return err
 	}
+	return nil
+}
+
+func initialize(log logger.Logger) (*AppState, error) {
+	errFactory := errors.New()
+
+	log.Debug().
+		Str("config_env", os.Getenv("NVIDIACTL_CONFIG")).
+		Msg("Starting nvidiactl...")
+
+	// Create application state
+	a, err := newApplication(log)
+	if err != nil {
+		var domainErr errors.Error
+		if !errors.As(err, &domainErr) {
+			domainErr = errFactory.Wrap(errors.ErrMainLoop, err)
+		}
+		log.ErrorWithCode(domainErr).Send()
+		return nil, err
+	}
+
+	// Re-initialize logger with config settings
+	if a.cfg.GetLogLevel() != string(config.DefaultLogLevel) {
+		a.logger = logger.New(a.cfg.GetLogLevel(), logger.IsService())
+	}
+
+	a.logger.Info().
+		Str("log_level", a.cfg.GetLogLevel()).
+		Bool("monitor_mode", a.cfg.IsMonitorMode()).
+		Bool("performance_mode", a.cfg.IsPerformanceMode()).
+		Bool("metrics", a.cfg.IsMetricsEnabled()).
+		Msg("Configuration loaded and applied")
+
+	return a, nil
 }
 
 func newApplication(log logger.Logger) (*AppState, error) {
@@ -255,9 +275,6 @@ func (a *AppState) cleanup() {
 		}
 	}
 
-	if err := pid.Remove(); err != nil {
-		a.logger.Error().Err(err).Msg("Failed to remove PID file")
-	}
 	a.logger.Info().Msg("Exiting...")
 }
 

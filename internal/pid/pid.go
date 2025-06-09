@@ -1,7 +1,6 @@
 package pid
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -43,7 +42,12 @@ func Write() error {
 		}
 	}
 
-	return os.WriteFile(path, []byte(fmt.Sprintf("%d", pid)), 0o600)
+	err := os.WriteFile(path, []byte(strconv.Itoa(pid)), 0o600)
+	if err != nil {
+		return errFactory.Wrap(errors.ErrInternal, err)
+	}
+
+	return nil
 }
 
 // Remove removes the PID file.
