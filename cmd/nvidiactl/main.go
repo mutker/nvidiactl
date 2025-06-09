@@ -12,7 +12,8 @@ import (
 	"codeberg.org/mutker/nvidiactl/internal/errors"
 	"codeberg.org/mutker/nvidiactl/internal/gpu"
 	"codeberg.org/mutker/nvidiactl/internal/logger"
-	metrics "codeberg.org/mutker/nvidiactl/internal/metrics"
+	"codeberg.org/mutker/nvidiactl/internal/metrics"
+	"codeberg.org/mutker/nvidiactl/internal/pid"
 )
 
 const (
@@ -50,6 +51,17 @@ func main() {
 
 	// Initialize with default log level first
 	log := logger.New(string(config.LogLevelInfo), logger.IsService())
+
+	if err := pid.Write(); err != nil {
+		var domainErr errors.Error
+		if !errors.As(err, &domainErr) {
+			domainErr = errFactory.Wrap(errors.ErrInitApp, err)
+		}
+		log.ErrorWithCode(domainErr).Send()
+		os.Exit(1)
+		return
+	}
+	defer pid.Remove()
 
 	log.Debug().
 		Str("config_env", os.Getenv("NVIDIACTL_CONFIG")).
@@ -149,7 +161,7 @@ func newApplication(log logger.Logger) (*AppState, error) {
 	if cfg.IsMetricsEnabled() {
 		collector, err = metrics.NewService(metrics.Config{
 			DBPath:  cfg.GetMetricsDBPath(),
-			Enabled: true,
+			Enabled: cfg.IsMetricsEnabled(),
 		}, log)
 		if err != nil {
 			var appErr errors.Error
@@ -241,6 +253,10 @@ func (a *AppState) cleanup() {
 		if err := a.metrics.Close(); err != nil {
 			a.logger.Error().Err(err).Msg("Failed to close metrics")
 		}
+	}
+
+	if err := pid.Remove(); err != nil {
+		a.logger.Error().Err(err).Msg("Failed to remove PID file")
 	}
 	a.logger.Info().Msg("Exiting...")
 }
@@ -368,7 +384,7 @@ func (a *AppState) logGPUState(ctx context.Context, state GPUState) {
 			Int("min_power_limit", int(powerLimits.Min)).
 			Int("max_power_limit", int(powerLimits.Max)).
 			Int("hysteresis", a.cfg.GetHysteresis()).
-			Bool("monitor", a.cfg.IsMonitorMode()).
+			Bool("monitor", a.metrics.IsReadOnly()).
 			Bool("performance", a.cfg.IsPerformanceMode()).
 			Bool("auto_fan_control", a.autoFanControl).
 			Msg("")
@@ -390,7 +406,7 @@ func (a *AppState) logGPUState(ctx context.Context, state GPUState) {
 	}
 
 	// Collect metrics in database, if enabled
-	if a.cfg.IsMetricsEnabled() && a.metrics != nil {
+	if a.metrics != nil && !a.metrics.IsReadOnly() {
 		snapshot := &metrics.MetricsSnapshot{
 			Timestamp: time.Now(),
 			FanSpeed: metrics.FanMetrics{

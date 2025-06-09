@@ -35,6 +35,7 @@ const (
 	ErrShutdownGPU     ErrorCode = "shutdown_gpu_failed"
 	ErrResetPowerLimit ErrorCode = "reset_power_limit_failed"
 	ErrEnableAutoFan   ErrorCode = "enable_auto_fan_failed"
+	ErrAlreadyRunning  ErrorCode = "already_running"
 
 	// Operation errors
 	ErrOperationFailed  ErrorCode = "operation_failed"
@@ -75,6 +76,7 @@ var errorMessages = map[ErrorCode]string{
 	ErrShutdownGPU:       "Failed to shutdown GPU",
 	ErrResetPowerLimit:   "Failed to reset power limit",
 	ErrEnableAutoFan:     "Failed to enable auto fan control",
+	ErrAlreadyRunning:    "nvidiactl is already running",
 }
 
 // GetErrorMessage returns the message for a given error code

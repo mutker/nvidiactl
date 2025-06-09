@@ -9,6 +9,7 @@ import (
 type MetricsCollector interface {
 	Record(ctx context.Context, snapshot *MetricsSnapshot) error
 	Close() error
+	IsReadOnly() bool
 }
 
 // Repository defines the interface for metrics data storage

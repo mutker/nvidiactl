@@ -76,6 +76,10 @@ func (s *service) Close() error {
 	return nil
 }
 
+func (s *service) IsReadOnly() bool {
+	return !s.cfg.Enabled
+}
+
 // No-op implementation
 func (*noopMetricsCollector) Record(_ context.Context, _ *MetricsSnapshot) error {
 	return nil
@@ -83,4 +87,8 @@ func (*noopMetricsCollector) Record(_ context.Context, _ *MetricsSnapshot) error
 
 func (*noopMetricsCollector) Close() error {
 	return nil
+}
+
+func (*noopMetricsCollector) IsReadOnly() bool {
+	return true
 }

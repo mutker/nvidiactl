@@ -26,9 +26,9 @@ nvidiactl is a command-line tool providing automatic fan speed management and dy
 
 Install the `nvidiactl-git` package from the AUR using your preferred AUR helper. For example, using `yay`:
 
-   ```
-   yay -S nvidiactl-git
-   ```
+```
+yay -S nvidiactl-git
+```
 
 After installation, you can enable and start the systemd service with `sudo systemctl enable --now nvidiactl.service`, and if you want to enable verbose or debug logging, add an override with `sudo systemctl edit nvidiactl`:
 
@@ -43,6 +43,7 @@ ExecStart=/usr/bin/nvidiactl --verbose # or --debug
 1. Ensure you have Go 1.23 or later installed on your system.
 
 2. Clone the repository:
+
    ```
    git clone https://codeberg.org/mutker/nvidiactl.git
    cd nvidiactl
