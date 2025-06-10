@@ -28,7 +28,10 @@ func newFanController(device nvml.Device, log logger.Logger) (FanController, err
 	}
 
 	count, ret := device.GetNumFans()
-	if !IsNVMLSuccess(ret) {
+	if ret == nvml.ERROR_FUNCTION_NOT_FOUND {
+		log.Warn().Msg("nvmlDeviceGetNumFans not supported, no fans available")
+		count = 0
+	} else if !IsNVMLSuccess(ret) {
 		return nil, errFactory.Wrap(ErrFanCountFailed, newNVMLError(ret))
 	}
 	fc.count = count
